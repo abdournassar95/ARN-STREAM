@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.wifi.WifiManager
 import com.arntechnology.stream.data.model.DiscoveredServer
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import okhttp3.OkHttpClient
