@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="beinBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#18072b"/>
+      <stop offset="50%" stop-color="#2a0d4c"/>
+      <stop offset="100%" stop-color="#0c0316"/>
+    </linearGradient>
+    <radialGradient id="beinGlow" cx="50%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="#8b5cf6" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#8b5cf6" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#a855f7"/>
+      <stop offset="100%" stop-color="#6366f1"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.6"/>
+    </filter>
+  </defs>
+
+  <!-- Background Base -->
+  <rect width="300" height="420" rx="20" fill="url(#beinBg)"/>
+  <rect width="300" height="420" rx="20" fill="url(#beinGlow)"/>
+
+  <!-- Decorative stadium geometry lines -->
+  <circle cx="150" cy="210" r="130" fill="none" stroke="#a855f7" stroke-width="1.5" stroke-opacity="0.15" stroke-dasharray="6 6"/>
+  <circle cx="150" cy="210" r="85" fill="none" stroke="#a855f7" stroke-width="1.5" stroke-opacity="0.2"/>
+  <path d="M 0 140 Q 150 90 300 140" fill="none" stroke="#c084fc" stroke-width="2" stroke-opacity="0.25"/>
+
+  <!-- Top Badges -->
+  <g transform="translate(18, 22)">
+    <rect width="68" height="24" rx="12" fill="#ef4444" filter="url(#shadow)"/>
+    <circle cx="14" cy="12" r="4" fill="#ffffff"/>
+    <text x="36" y="16" fill="#ffffff" font-family="'Cairo', 'Inter', sans-serif" font-weight="900" font-size="11" letter-spacing="1">LIVE</text>
+  </g>
+
+  <g transform="translate(216, 22)">
+    <rect width="66" height="24" rx="6" fill="#000000" fill-opacity="0.6" stroke="#ffffff" stroke-opacity="0.2" stroke-width="1"/>
+    <text x="33" y="16" fill="#38bdf8" font-family="'Inter', sans-serif" font-weight="800" font-size="11" text-anchor="middle">4K UHD</text>
+  </g>
+
+  <!-- Center beIN Branding -->
+  <g transform="translate(150, 195)" filter="url(#shadow)" text-anchor="middle">
+    <!-- Glowing background plate -->
+    <rect x="-105" y="-60" width="210" height="120" rx="18" fill="#130524" fill-opacity="0.75" stroke="#a855f7" stroke-opacity="0.35" stroke-width="1.5"/>
+    
+    <!-- beIN Typography -->
+    <text x="0" y="-12" fill="#ffffff" font-family="'Inter', 'Arial Black', sans-serif" font-weight="900" font-size="44" letter-spacing="-1">
+      be<tspan fill="#a855f7">IN</tspan>
+    </text>
+    
+    <!-- SPORTS Subtitle -->
+    <text x="0" y="18" fill="#e2e8f0" font-family="'Inter', sans-serif" font-weight="800" font-size="18" letter-spacing="7">
+      SPORTS
+    </text>
+
+    <!-- Channel Badge 1 HD -->
+    <g transform="translate(0, 36)">
+      <rect x="-42" y="0" width="84" height="20" rx="10" fill="url(#purpleGrad)"/>
+      <text x="0" y="14" fill="#ffffff" font-family="'Cairo', 'Inter', sans-serif" font-weight="900" font-size="11" letter-spacing="1">
+        1 PREMIUM
+      </text>
+    </g>
+  </g>
+
+  <!-- Bottom Details -->
+  <g transform="translate(20, 360)">
+    <text x="0" y="14" fill="#ffffff" font-family="'Cairo', sans-serif" font-weight="800" font-size="16">دوري أبطال أوروبا</text>
+    <text x="0" y="32" fill="#94a3b8" font-family="'Cairo', sans-serif" font-weight="600" font-size="12">الدوري الإنجليزي الممتاز</text>
+  </g>
+
+  <!-- Subtle Border Rim -->
+  <rect width="298" height="418" x="1" y="1" rx="19" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-opacity="0.15"/>
+</svg>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black_bg">#090D16</color>
+    <color name="slate_dark">#020617</color>
+    <color name="arn_emerald">#10B981</color>
+    <color name="movie_primary">#E50914</color>
+    <color name="series_primary">#F59E0B</color>
+    <color name="music_primary">#1DB954</color>
+    <color name="quran_primary">#0D9488</color>
+</resources>

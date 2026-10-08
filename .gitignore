@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# Production builds & packages
+dist/
+build/
+Output/
+client/dist/
+launcher.zip
+*.exe
+*.msi
+
+# Python cache & artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.spec
+
+# Environment & credentials
+.env
+.env.local
+.env.*.local
+*.pfx
+
+# Vite temporary files & logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+vite.config.js.timestamp-*.mjs
+client/vite.config.js.timestamp-*.mjs
+
+# OS & Editor temporary files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo

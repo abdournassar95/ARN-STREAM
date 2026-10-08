@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="natBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1c1603"/>
+      <stop offset="50%" stop-color="#3b2d07"/>
+      <stop offset="100%" stop-color="#120e02"/>
+    </linearGradient>
+    <radialGradient id="natGlow" cx="50%" cy="30%" r="65%">
+      <stop offset="0%" stop-color="#facc15" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#facc15" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="amberGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#facc15"/>
+      <stop offset="100%" stop-color="#eab308"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.6"/>
+    </filter>
+  </defs>
+
+  <!-- Background Base -->
+  <rect width="300" height="420" rx="20" fill="url(#natBg)"/>
+  <rect width="300" height="420" rx="20" fill="url(#natGlow)"/>
+
+  <!-- Compass / Geometric circles -->
+  <circle cx="150" cy="195" r="110" fill="none" stroke="#facc15" stroke-width="1.5" stroke-opacity="0.2" stroke-dasharray="10 8"/>
+  <circle cx="150" cy="195" r="70" fill="none" stroke="#facc15" stroke-width="1" stroke-opacity="0.15"/>
+
+  <!-- Top Badges -->
+  <g transform="translate(18, 22)">
+    <rect width="68" height="24" rx="12" fill="#ef4444" filter="url(#shadow)"/>
+    <circle cx="14" cy="12" r="4" fill="#ffffff"/>
+    <text x="36" y="16" fill="#ffffff" font-family="'Cairo', 'Inter', sans-serif" font-weight="900" font-size="11" letter-spacing="1">LIVE</text>
+  </g>
+
+  <g transform="translate(222, 22)">
+    <rect width="60" height="24" rx="6" fill="#000000" fill-opacity="0.6" stroke="#facc15" stroke-opacity="0.4" stroke-width="1"/>
+    <text x="30" y="16" fill="#fde047" font-family="'Inter', sans-serif" font-weight="800" font-size="11" text-anchor="middle">FHD</text>
+  </g>
+
+  <!-- Center NatGeo Branding -->
+  <g transform="translate(150, 195)" filter="url(#shadow)" text-anchor="middle">
+    <!-- Glowing background plate -->
+    <rect x="-105" y="-60" width="210" height="120" rx="18" fill="#140f02" fill-opacity="0.9" stroke="#facc15" stroke-opacity="0.4" stroke-width="1.5"/>
+    
+    <!-- Iconic Yellow Frame -->
+    <rect x="-85" y="-45" width="24" height="34" rx="3" fill="none" stroke="#facc15" stroke-width="6"/>
+    
+    <!-- Typography -->
+    <text x="-48" y="-30" fill="#ffffff" font-family="'Inter', sans-serif" font-weight="800" font-size="11" letter-spacing="2" text-anchor="start">
+      NATIONAL
+    </text>
+    <text x="-48" y="-16" fill="#ffffff" font-family="'Inter', sans-serif" font-weight="800" font-size="10" letter-spacing="1.5" text-anchor="start">
+      GEOGRAPHIC
+    </text>
+    
+    <!-- Abu Dhabi Arabic Subtitle -->
+    <text x="0" y="20" fill="#facc15" font-family="'Cairo', sans-serif" font-weight="900" font-size="20">
+      أبوظبي
+    </text>
+
+    <!-- Channel Badge -->
+    <g transform="translate(0, 36)">
+      <rect x="-35" y="0" width="70" height="20" rx="10" fill="url(#amberGrad)"/>
+      <text x="0" y="14" fill="#000000" font-family="'Cairo', 'Inter', sans-serif" font-weight="900" font-size="11" letter-spacing="1">
+        وثائقي
+      </text>
+    </g>
+  </g>
+
+  <!-- Bottom Details -->
+  <g transform="translate(20, 360)">
+    <text x="0" y="14" fill="#ffffff" font-family="'Cairo', sans-serif" font-weight="800" font-size="16">عالم الحيوان والطبيعة</text>
+    <text x="0" y="32" fill="#fef08a" font-family="'Cairo', sans-serif" font-weight="600" font-size="12">تحقيقات واكتشافات علمية</text>
+  </g>
+
+  <!-- Subtle Border Rim -->
+  <rect width="298" height="418" x="1" y="1" rx="19" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-opacity="0.15"/>
+</svg>

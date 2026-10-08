@@ -1,0 +1,18 @@
+export const PRESET_AVATARS = [
+  { id: 'avatar-1', path: '/avatars/avatar-1.svg', nameAr: 'المخرج السينمائي', nameEn: 'Cinema Director' },
+  { id: 'avatar-2', path: '/avatars/avatar-2.svg', nameAr: 'عاشق الفشار', nameEn: 'Popcorn Buff' },
+  { id: 'avatar-3', path: '/avatars/avatar-3.svg', nameAr: 'صانع الموسيقى (DJ)', nameEn: 'Sound DJ' },
+  { id: 'avatar-4', path: '/avatars/avatar-4.svg', nameAr: 'سيد الفينيل الكلاسيكي', nameEn: 'Vinyl Master' },
+  { id: 'avatar-5', path: '/avatars/avatar-5.svg', nameAr: 'رائد الفضاء', nameEn: 'Cosmic Astronaut' },
+  { id: 'avatar-6', path: '/avatars/avatar-6.svg', nameAr: 'عاشق الألعاب', nameEn: 'Retro Gamer' },
+  { id: 'avatar-7', path: '/avatars/avatar-7.svg', nameAr: 'البطل السيبراني', nameEn: 'Cyber Hero' },
+  { id: 'avatar-8', path: '/avatars/avatar-8.svg', nameAr: 'التاج الملكي', nameEn: 'Royal VIP' },
+  { id: 'avatar-9', path: '/avatars/avatar-9.svg', nameAr: 'صوت البودكاست', nameEn: 'Studio Mic' },
+  { id: 'avatar-10', path: '/avatars/avatar-10.svg', nameAr: 'القط الهادئ', nameEn: 'Chill Cat' },
+  { id: 'avatar-11', path: '/avatars/avatar-11.svg', nameAr: 'شبح النينجا', nameEn: 'Shadow Ninja' },
+  { id: 'avatar-12', path: '/avatars/avatar-12.svg', nameAr: 'النجم الأسطوري', nameEn: 'Star Legend' },
+  { id: 'avatar-13', path: '/avatars/avatar-13.svg', nameAr: 'قهوة وهدوء', nameEn: 'Cozy Listener' },
+  { id: 'avatar-14', path: '/avatars/avatar-14.svg', nameAr: 'المسرح والفنون', nameEn: 'Drama Theatre' },
+  { id: 'avatar-15', path: '/avatars/avatar-15.svg', nameAr: 'الماسة النقية', nameEn: 'Diamond VIP' },
+  { id: 'avatar-16', path: '/avatars/avatar-16.svg', nameAr: 'صاعقة النيون', nameEn: 'Neon Lightning' },
+];

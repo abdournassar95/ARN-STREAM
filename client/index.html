@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ARN Stream | منصة الترفيه والوسائط المتكاملة</title>
+  
+  <meta name="description" content="ARN Stream - المنصة المنزلية المتكاملة لبث وإدارة الأفلام والمسلسلات والموسيقى والتلاوات القرآنية بدقة عالية وتصميم عصري." />
+  <meta name="keywords" content="ARN Stream, بث وسائط, أفلام, مسلسلات, موسيقى, قرآن كريم, media server" />
+  <meta name="author" content="ARN Technology - عبده رجب نصار" />
+  <meta name="theme-color" content="#e50914" />
+  <link rel="manifest" href="/manifest.json" />
+  
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="ARN Stream | منصة الترفيه والوسائط المتكاملة" />
+  <meta property="og:description" content="المنصة المنزلية المتكاملة لبث وإدارة الأفلام والمسلسلات والموسيقى بجودة فائقة وسرعة استثنائية." />
+  <meta property="og:image" content="/icon.png" />
+  <meta property="og:site_name" content="ARN Stream" />
+  <meta property="og:locale" content="ar_AR" />
+  
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="ARN Stream | منصة الترفيه والوسائط المتكاملة" />
+  <meta name="twitter:description" content="المنصة المنزلية المتكاملة لبث وإدارة الأفلام والمسلسلات والموسيقى بجودة فائقة." />
+  <meta name="twitter:image" content="/icon.png" />
+  
+  <link rel="icon" type="image/jpeg" href="/favicon.jpg" />
+</head>
+<body class="bg-bg text-text antialiased">
+  <div id="root"></div>
+  <script type="module" src="/src/main.jsx"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+        navigator.serviceWorker.getRegistrations().then(regs => {
+          for (const reg of regs) reg.unregister();
+        });
+        if ('caches' in window) {
+          caches.keys().then(names => {
+            for (const name of names) {
+              if (name.startsWith('arn-stream')) caches.delete(name);
+            }
+          });
+        }
+      } else {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {});
+        });
+      }
+    }
+  </script>
+</body>
+</html>

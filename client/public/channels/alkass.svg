@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="kassBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2b0816"/>
+      <stop offset="50%" stop-color="#4d0e26"/>
+      <stop offset="100%" stop-color="#19040c"/>
+    </linearGradient>
+    <radialGradient id="kassGlow" cx="50%" cy="30%" r="65%">
+      <stop offset="0%" stop-color="#ec4899" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#ec4899" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="maroonGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f43f5e"/>
+      <stop offset="100%" stop-color="#be123c"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.6"/>
+    </filter>
+  </defs>
+
+  <!-- Background Base -->
+  <rect width="300" height="420" rx="20" fill="url(#kassBg)"/>
+  <rect width="300" height="420" rx="20" fill="url(#kassGlow)"/>
+
+  <!-- Geometric Stadium Arcs -->
+  <circle cx="150" cy="195" r="115" fill="none" stroke="#ec4899" stroke-width="1.5" stroke-opacity="0.2"/>
+  <path d="M 0 160 Q 150 110 300 160" fill="none" stroke="#f472b6" stroke-width="2" stroke-opacity="0.25"/>
+
+  <!-- Top Badges -->
+  <g transform="translate(18, 22)">
+    <rect width="68" height="24" rx="12" fill="#ef4444" filter="url(#shadow)"/>
+    <circle cx="14" cy="12" r="4" fill="#ffffff"/>
+    <text x="36" y="16" fill="#ffffff" font-family="'Cairo', 'Inter', sans-serif" font-weight="900" font-size="11" letter-spacing="1">LIVE</text>
+  </g>
+
+  <g transform="translate(222, 22)">
+    <rect width="60" height="24" rx="6" fill="#000000" fill-opacity="0.6" stroke="#ec4899" stroke-opacity="0.4" stroke-width="1"/>
+    <text x="30" y="16" fill="#fbcfe8" font-family="'Inter', sans-serif" font-weight="800" font-size="11" text-anchor="middle">FHD</text>
+  </g>
+
+  <!-- Center Alkass Branding -->
+  <g transform="translate(150, 195)" filter="url(#shadow)" text-anchor="middle">
+    <!-- Glowing background plate -->
+    <rect x="-105" y="-60" width="210" height="120" rx="18" fill="#1b050f" fill-opacity="0.85" stroke="#ec4899" stroke-opacity="0.35" stroke-width="1.5"/>
+    
+    <!-- Alkass Arabic Calligraphic Emblem -->
+    <text x="0" y="0" fill="#ffffff" font-family="'Cairo', sans-serif" font-weight="900" font-size="38">
+      الكأس
+    </text>
+    
+    <!-- Subtitle -->
+    <text x="0" y="22" fill="#f472b6" font-family="'Inter', sans-serif" font-weight="800" font-size="14" letter-spacing="4">
+      SPORTS
+    </text>
+
+    <!-- Channel Badge -->
+    <g transform="translate(0, 36)">
+      <rect x="-35" y="0" width="70" height="20" rx="10" fill="url(#maroonGrad)"/>
+      <text x="0" y="14" fill="#ffffff" font-family="'Inter', sans-serif" font-weight="900" font-size="11" letter-spacing="1">
+        1 HD
+      </text>
+    </g>
+  </g>
+
+  <!-- Bottom Details -->
+  <g transform="translate(20, 360)">
+    <text x="0" y="14" fill="#ffffff" font-family="'Cairo', sans-serif" font-weight="800" font-size="16">بطولات الخليج وآسيا</text>
+    <text x="0" y="32" fill="#fbcfe8" font-family="'Cairo', sans-serif" font-weight="600" font-size="12">تغطيات واستوديوهات حية</text>
+  </g>
+
+  <!-- Subtle Border Rim -->
+  <rect width="298" height="418" x="1" y="1" rx="19" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-opacity="0.15"/>
+</svg>
