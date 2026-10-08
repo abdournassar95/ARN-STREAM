@@ -7,14 +7,47 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.arntechnology.stream.ui.screens.CategoryScreen
+import com.arntechnology.stream.ui.screens.DiscoveryScreen
 import com.arntechnology.stream.ui.screens.HomeScreen
+import com.arntechnology.stream.ui.screens.LoginScreen
+import com.arntechnology.stream.ui.screens.SplashScreen
 
 @Composable
 fun ArnNavGraph(navController: NavHostController) {
     NavHost(
         navController = navController,
-        startDestination = Screen.Home.route
+        startDestination = Screen.Splash.route
     ) {
+        composable(route = Screen.Splash.route) {
+            SplashScreen(
+                onNavigateToDiscovery = { 
+                    navController.navigate(Screen.Discovery.route) { popUpTo(Screen.Splash.route) { inclusive = true } } 
+                },
+                onNavigateToLogin = { 
+                    navController.navigate(Screen.Login.route) { popUpTo(Screen.Splash.route) { inclusive = true } } 
+                },
+                onNavigateToHome = { 
+                    navController.navigate(Screen.Home.route) { popUpTo(Screen.Splash.route) { inclusive = true } } 
+                }
+            )
+        }
+
+        composable(route = Screen.Discovery.route) {
+            DiscoveryScreen(
+                onServerSelected = {
+                    navController.navigate(Screen.Login.route) { popUpTo(Screen.Discovery.route) { inclusive = true } }
+                }
+            )
+        }
+
+        composable(route = Screen.Login.route) {
+            LoginScreen(
+                onLoginSuccess = {
+                    navController.navigate(Screen.Home.route) { popUpTo(Screen.Login.route) { inclusive = true } }
+                }
+            )
+        }
+
         composable(route = Screen.Home.route) {
             HomeScreen(
                 onCategorySelected = { categoryName ->
