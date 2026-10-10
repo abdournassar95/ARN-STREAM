@@ -1,0 +1,8 @@
+{
+  "name": "ARN Stream",
+  "description": "منصة ARN Stream الترفيهية لبث الأفلام والمسلسلات والموسيقى والقرآن الكريم",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
