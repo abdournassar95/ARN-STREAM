@@ -5,6 +5,9 @@ on:
     branches: [ "main", "master" ]
   workflow_dispatch: # Allows manual trigger from GitHub UI
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -33,9 +36,21 @@ jobs:
         fi
         chmod +x gradlew
         ./gradlew assembleDebug --no-daemon --stacktrace
+        cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/ARN-Stream.apk
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
         name: ARN-Stream-App
-        path: android/app/build/outputs/apk/debug/app-debug.apk
+        path: android/app/build/outputs/apk/debug/ARN-Stream.apk
+
+    - name: Publish Direct APK Release
+      uses: softprops/action-gh-release@v2
+      if: success()
+      with:
+        tag_name: v1.0.0
+        name: "ARN Stream v1.0.0 - Android APK"
+        body: "تطبيق ARN Stream للأندرويد جاهز للتثبيت المباشر.\n\n⚠️ ملاحظة: إذا ظهر لك تحذير Play Protect، اختر 'مزيد من التفاصيل' ثم 'التثبيت على أي حال'."
+        files: android/app/build/outputs/apk/debug/ARN-Stream.apk
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
