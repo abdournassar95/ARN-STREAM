@@ -24,11 +24,15 @@ android {
 
   signingConfigs {
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+      val ksFile = file("arn_technology_release.jks")
+      storeFile = if (ksFile.exists()) ksFile else file("${rootDir}/arn_technology_release.jks")
+      storePassword = "arn_stream_2026"
+      keyAlias = "arn_technology"
+      keyPassword = "arn_stream_2026"
+      enableV1Signing = true
+      enableV2Signing = true
+      enableV3Signing = true
+      enableV4Signing = true
     }
   }
 
@@ -37,13 +41,10 @@ android {
       isCrunchPngs = false
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      val keyPath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      if (file(keyPath).exists()) {
-        signingConfig = signingConfigs.getByName("release")
-      }
+      signingConfig = signingConfigs.getByName("release")
     }
     debug {
-      // Uses default Android SDK debug keystore
+      signingConfig = signingConfigs.getByName("release")
     }
   }
   compileOptions {
