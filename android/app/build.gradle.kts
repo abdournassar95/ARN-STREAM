@@ -10,14 +10,14 @@ plugins {
 
 android {
   namespace = "com.example"
-  compileSdk { version = release(36) { minorApiLevel = 1 } }
+  compileSdk = 35
 
   defaultConfig {
     applicationId = "com.arntechnology.stream"
     minSdk = 24
     targetSdk = 34
-    versionCode = 1
-    versionName = "1.0.0"
+    versionCode = 2
+    versionName = "1.0.1"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -32,7 +32,7 @@ android {
       enableV1Signing = true
       enableV2Signing = true
       enableV3Signing = true
-      enableV4Signing = true
+      enableV4Signing = false
     }
   }
 

@@ -28,11 +28,16 @@ jobs:
       with:
         gradle-version: '9.3.1'
 
-    - name: Generate Signing Keystore
+    - name: Generate and Persist Signing Keystore
       run: |
         cd android
         if [ ! -f "app/arn_technology_release.jks" ]; then
           keytool -genkeypair -v -keystore app/arn_technology_release.jks -alias arn_technology -keyalg RSA -keysize 2048 -validity 10000 -storepass arn_stream_2026 -keypass arn_stream_2026 -dname "CN=ARN Technology, OU=Mobile, O=ARN Technology, L=Cairo, ST=Cairo, C=EG"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add app/arn_technology_release.jks
+          git commit -m "chore: persist signing keystore for consistent APK signature" || true
+          git push || true
         fi
 
     - name: Build Android APK (Release and Debug)
@@ -58,9 +63,9 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: success()
       with:
-        tag_name: v1.0.0
-        name: "ARN Stream v1.0.0 - Android APK"
-        body: "تطبيق ARN Stream للأندرويد جاهز للتثبيت المباشر.\n\n⭐ النسخة الرسمية الأساسية: ARN-Stream-Release.apk (موقعة ومجهزة لجميع الهواتف والشاشات).\n\n⚠️ ملاحظة: إذا ظهر لك تحذير Play Protect، اختر 'مزيد من التفاصيل' ثم 'التثبيت على أي حال'."
+        tag_name: v1.0.1
+        name: "ARN Stream v1.0.1 - Android APK"
+        body: "تطبيق ARN Stream للأندرويد (تحديث التوافق الشامل v1.0.1).\n\n⭐ النسخة الرسمية: ARN-Stream-Release.apk\n🛠️ النسخة التجريبية: ARN-Stream-Debug.apk\n\n📌 ملاحظات التثبيت الهامة:\n1. إذا كانت لديك أي نسخة تجريبية سابقة مثبتة، يرجى حذفها أولاً من الهاتف.\n2. عند ظهور شاشة حماية Play Protect، اضغط على 'مزيد من التفاصيل' ثم 'التثبيت على أي حال'."
         files: |
           android/app/build/outputs/apk/release/ARN-Stream-Release.apk
           android/app/build/outputs/apk/release/ARN-Stream-Debug.apk
