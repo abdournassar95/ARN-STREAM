@@ -57,6 +57,7 @@ private fun Context.findActivity(): Activity? {
 }
 
 @SuppressLint("SetJavaScriptEnabled")
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WebClientScreen(
     preferencesManager: PreferencesManager,
@@ -179,11 +180,8 @@ fun WebClientScreen(
                             userAgentString = "${settings.userAgentString} ARNStreamAndroidClient/1.0"
                         }
 
-                        CookieManager.getInstance().apply {
-                            setAcceptCookie(true)
-                            setAcceptThirdPartyCookies(this@apply, true)
-                        }
-
+                        // CookieManager needs the WebView instance, not CookieManager itself.
+                        // This is set after the WebView has been created.
                         webViewClient = object : WebViewClient() {
                             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                 super.onPageStarted(view, url, favicon)
@@ -291,6 +289,11 @@ fun WebClientScreen(
                         }
 
                         loadUrl(targetUrl!!)
+                    }
+
+                    CookieManager.getInstance().apply {
+                        setAcceptCookie(true)
+                        setAcceptThirdPartyCookies(webView, true)
                     }
 
                     rootContainer.addView(webView)
