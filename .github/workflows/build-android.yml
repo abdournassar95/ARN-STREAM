@@ -63,8 +63,8 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: success()
       with:
-        tag_name: v1.0.1
-        name: "ARN Stream v1.0.1 - Android APK"
+        tag_name: v2.0.0
+        name: "ARN Stream v2.0.0 - Production Release (Windows & Android)"
         body: "تطبيق ARN Stream للأندرويد (تحديث التوافق الشامل v1.0.1).\n\n⭐ النسخة الرسمية: ARN-Stream-Release.apk\n🛠️ النسخة التجريبية: ARN-Stream-Debug.apk\n\n📌 ملاحظات التثبيت الهامة:\n1. إذا كانت لديك أي نسخة تجريبية سابقة مثبتة، يرجى حذفها أولاً من الهاتف.\n2. عند ظهور شاشة حماية Play Protect، اضغط على 'مزيد من التفاصيل' ثم 'التثبيت على أي حال'."
         files: |
           android/app/build/outputs/apk/release/ARN-Stream-Release.apk
