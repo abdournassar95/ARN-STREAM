@@ -21,6 +21,7 @@ import com.example.ui.screens.mylist.MyListScreen
 import com.example.ui.screens.player.VideoPlayerScreen
 import com.example.ui.screens.remote.RemoteControlScreen
 import com.example.ui.screens.splash.SplashScreen
+import com.example.ui.screens.web.WebClientScreen
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 
@@ -55,7 +56,7 @@ fun ArnStreamAppNavigation(preferencesManager: PreferencesManager) {
 
     NavHost(
         navController = navController,
-        startDestination = "home"
+        startDestination = "splash"
     ) {
         composable("splash") {
             SplashScreen(
@@ -72,8 +73,19 @@ fun ArnStreamAppNavigation(preferencesManager: PreferencesManager) {
             ConnectScreen(
                 preferencesManager = preferencesManager,
                 onConnected = {
-                    navController.navigate("home") {
-                        popUpTo("home") { inclusive = true }
+                    navController.navigate("web") {
+                        popUpTo("connect") { inclusive = true }
+                    }
+                }
+            )
+        }
+
+        composable("web") {
+            WebClientScreen(
+                preferencesManager = preferencesManager,
+                onSwitchServer = {
+                    navController.navigate("connect") {
+                        popUpTo("web") { inclusive = true }
                     }
                 }
             )

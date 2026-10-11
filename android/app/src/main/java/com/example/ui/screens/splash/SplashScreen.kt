@@ -44,7 +44,8 @@ fun SplashScreen(
     LaunchedEffect(Unit) {
         val savedUrl = preferencesManager.serverUrl.firstOrNull()
         if (!savedUrl.isNullOrEmpty()) {
-            onNavigateNext("home")
+            delay(500)
+            onNavigateNext("web")
         } else {
             delay(1000)
             onNavigateNext("connect")
