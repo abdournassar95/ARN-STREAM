@@ -1,6 +1,0 @@
-{
-  "summary":  "Comprehensive implementation plan to fix missing album covers, load all server movies and series with 500-item pagination, and restore authenticated poster and backdrop rendering on media details screens.",
-  "updatedAt":  "2026-10-09T12:37:43.311148510Z",
-  "requestFeedback":  true,
-  "userFacing":  true
-}

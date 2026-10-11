@@ -1,187 +1,125 @@
-# PersonalStream — Netflix + Spotify Local Media Server
+# 🎬 منصة ARN Stream المتكاملة (خادم وتطبيق بث الوسائط)
+### ARN Stream — Ultimate Home & Enterprise Media Server & Streaming Ecosystem
 
-> 📜 **الدستور والمرجع الشامل للمشروع:** تم توثيق كامل معمارية وهوية وخطة بناء المشروع في [ARN_STREAM_CONSTITUTION.md](file:///d:/PersonalStream/ARN_STREAM_CONSTITUTION.md).
-
-**PersonalStream** هو خادم وسائط شخصي يعمل على `localhost` فقط — واجهة Netflix للأفلام والمسلسلات + واجهة Spotify للموسيقى. يدعم مكتبة ضخمة (500+ فيلم، 1000+ حلقة، 2000+ أغنية) مع Direct Play فقط (بدون تحويل صيغ).
-
----
-
-## 🏗️ البنية — نظام الوكلاء المتعددين (Agents 0-8)
-
-تم بناء المشروع باستخدام 9 وكلاء متخصصين بالتوازي:
-
-| الوكيل | المسؤولية | يعتمد على |
-|--------|-----------|-----------|
-| **Agent 0** | Design System + i18n (العربية/الإنجليزية + RTL) | — |
-| **Agent 1** | Core Backend — DB `better-sqlite3` + Media Scanner `chokidar + ffprobe` | — |
-| **Agent 2** | Image System — `sharp` + Cache + Deduplication MD5 | Agent 1 |
-| **Agent 3** | API Layer — جميع الـ Endpoints (Express) | Agents 1,2 |
-| **Agent 4** | Netflix UI — Movies/Series + تفاصيل + مشغل Video.js | Agents 0,3 |
-| **Agent 5** | Spotify UI — Music + Artist/Album/Player + MiniPlayer | Agents 0,3 |
-| **Agent 6** | Shared Features — Ratings/Tags/Collections/Playlists | Agents 0,3 |
-| **Agent 7** | Metadata — TMDB + MusicBrainz (يدوي فقط) | Agent 3 |
-| **Agent 8** | QA & Performance — فحص 3500 ملف + اختبارات | الجميع |
+> **تطوير وبرمجة:** عبده رجب نصار  
+> **الشركة:** ARN Technology  
+> **حقوق الملكية والنشر:** جميع الحقوق محفوظة (c) 2026 لشركة ARN Technology  
+> **الهوية:** تصميم عصري فاخر (Dark Glassmorphic UI) مع أداء عالي وسرعة استجابة فائقة.
 
 ---
 
-## 🎨 نظام التصميم
+## 🌟 نظرة عامة عن المنصة (Overview)
 
-```css
---color-primary-movies: #E50914
---color-primary-music:  #1DB954
---color-bg:            #0A0A0A
---color-surface:       #1A1A1A
---color-surface-hover: #252525
---color-text:          #FFFFFF
---color-text-muted:    #A1A1A1
---color-border:        #2A2A2A
-```
+منصة **ARN Stream** هي منظومة وسائط ترفيهية متكاملة تجمع بين أفضل تجارب منصات البث العالمية (**Netflix** للأفلام والمسلسلات والمسرحيات والوثائقيات) و(**Spotify** للموسيقى والألبومات والتراكات) وقسم خاص للوسائط الروحية (**القرآن الكريم**)، مع معمارية Direct Play بدون استهلاك زائد لموارد المعالج وبدون الحاجة لمفاتيح API خارجية.
 
-- الخط: `Inter` للإنجليزية، `Cairo` للعربية
-- RTL كامل عند اختيار العربية
-- جميع النصوص في `client/src/i18n/{en,ar}.json`
-- مكونات مشتركة: Button, Card, Modal, Input, Rating (نصف نجمة), Tag, Spinner, Toast
+المنظومة تضم:
+1. 🖥️ **خادم الوسائط الفائق (Backend Media Server):** مبني بـ Node.js و Express مع محرك قواعد بيانات SQLite سريع جداً، وفحص الوسائط عبر FFmpeg/ffprobe وإدارة الكاش الذكي للصور بدقة عالية.
+2. 🌐 **واجهة مستخدم الويب (Web Client UI):** مبنية بـ React 18 و Vite وتنسيقات Tailwind CSS الفاخرة بنمط Glassmorphism ودعم كامل للغة العربية (RTL) والإنجليزية.
+3. 📱 **تطبيق الأندرويد الهجين (Android Native Client):** تطبيق أصلي مبني بتقنيات Jetpack Compose الحديثة و ExoPlayer (Media3)، مع اكتشاف تلقائي للخوادم عبر الشبكة المحلية (UDP Auto-Discovery) والربط السريع عبر QR Code.
+4. 🚀 **مشغل سطح المكتب وحزمة التثبيت (Launcher & Desktop Setup):** سكريبتات تشغيل تلقائية وحزمة تثبيت Inno Setup موقعة رقمياً بشهادة ARN Technology المعتمدة لتخطي حظر Smart App Control و SmartScreen.
 
 ---
 
-## 📂 هيكل المجلدات
+## 🗂️ هيكل المجلدات والملفات (Project Architecture)
 
 ```
-PersonalStream/
-├── server/
-│   ├── index.js              # Express server :8096
-│   ├── db.js                 # better-sqlite3 + schema كامل
-│   ├── scanner/
-│   │   ├── media-scanner.js  # أفلام/مسلسلات/موسيقى + demo seeding
-│   │   ├── image-scanner.js  # بحث الصور حسب النمط
-│   │   └── helpers.js        # parseMovieFolder, parse SxxExx, ffprobe (max 4 parallel)
-│   ├── routes/               # library, movies, series, music, images, stream, playback, ratings, tags, collections, playlists
-│   ├── services/
-│   │   ├── image-cache.js    # sharp compress 500px + thumb 300px + MD5 dedup
-│   │   ├── metadata-tmdb.js  # TMDB (يدوي)
-│   │   └── metadata-musicbrainz.js
-│   └── data/media.db
-└── client/
-    ├── src/
-    │   ├── pages/Landing.jsx (كرتان: Movies & Music)
-    │   ├── pages/movies/{Home, MovieDetails, SeriesDetails, Player}
-    │   ├── pages/music/{Home, Artist, Album}
-    │   ├── components/shared/{TopBar, Card, Rating, Tag, Button}
-    │   ├── components/music/MiniPlayer.jsx (persistent)
-    │   ├── i18n/{en,ar}.json
-    │   ├── api/client.js (axios)
-    │   └── store/usePlayerStore.js (Zustand)
-    └── dist/ (production)
+ARN-Stream/
+├── android/                   # تطبيق الأندرويد الرسمي (Jetpack Compose + ExoPlayer + WebView)
+│   ├── app/
+│   │   ├── src/main/java/     # شاشات الاتصال، المشغل، والبحث التلقائي
+│   │   ├── src/main/res/      # الأيقونات والثيم الداكن الفاخر
+│   │   └── build.gradle.kts   # إعدادات البناء والتوقيع الرقمي الرسمي
+│   └── gradle/                # حزم ومكتبات أندرويد Gradle
+├── server/                    # خادم الوسائط الخلفي (Node.js / Express / SQLite)
+│   ├── index.js               # نقطة الانطلاق الرئيسية لخادم Express ومنافذ البث
+│   ├── db.js                  # هيكل وتجهيز قاعدة بيانات SQLite فائقة السرعة
+│   ├── scanner/               # محرك فحص المجلدات واستخراج الميتاداتا وفحص التراكات
+│   ├── services/              # خدمات كاش الصور، واستعلامات TMDB التلقائية
+│   └── routes/                # مسارات الـ API (أفلام، مسلسلات، صوتيات، تشغيل، تقييمات)
+├── client/                    # واجهة المستخدم الأمامية (React + Vite + Tailwind CSS)
+│   ├── src/pages/             # شاشات الأفلام، المسلسلات، الموسيقى، والمشغل
+│   ├── src/components/        # المكونات الزجاجية الشفافة، البطاقات، والقوائم
+│   ├── src/i18n/              # الترجمة الكاملة (عربي مع RTL وإنجليزي)
+│   └── package.json           # حزم واجهة الويب
+├── launcher/                  # مشغل سطح المكتب والشاشات المساعدة
+├── scripts/                   # سكريبتات الأتمتة والفحص
+├── cert/                      # شهادات التوثيق الرقمي لـ ARN Technology
+├── .github/workflows/         # خطوط أنابيب GitHub Actions للبناء التلقائي لـ APK
+├── installer.iss              # ملف بناء حزمة التثبيت Inno Setup
+├── build_and_sign.ps1         # سكريبت البناء والتوقيع الرقمي المعتمد RFC-3161
+└── package.json               # إدارة وتشغيل المشروع ككل
 ```
 
 ---
 
-## 🚀 التشغيل
+## 🚀 طريقة التثبيت والتشغيل السريع (Quick Start)
 
-### المتطلبات
-- Node.js 20+
-- Windows (المسارات `D:\Media\...`) — يعمل أيضاً مع بيانات تجريبية إذا لم يوجد المجلد
+### 1. المتطلبات الأساسية
+- **Node.js**: الإصدار 18 أو أحدث (يُفضل 20 LTS).
+- **نظام التشغيل**: Windows 10/11 أو Linux أو macOS.
+- **Android Studio / Android SDK**: (اختياري لبناء تطبيق الهاتف محلياً، كما يتم بناؤه آلياً عبر GitHub Actions).
 
-### التثبيت والتشغيل
-
+### 2. تثبيت الحزم (Installation)
+من المجلد الرئيسي للمشروع، قم بتشغيل:
 ```bash
-# تثبيت الكل
 npm run install:all
-# أو يدوياً
-cd server && npm install
-cd client && npm install
+```
+أو تثبيت كل جزء بشكل منفصل:
+```bash
+# تثبيت حزم الخادم
+cd server
+npm install
 
-# بناء الواجهة
-cd client && npm run build
-
-# تشغيل الخادم (يخدم الـ API + الواجهة المبنية)
-cd server && npm start
-# → http://localhost:8096
-# → API: http://localhost:8096/api
-
-# تطوير (منفصل)
-cd server && npm run dev   # --watch
-cd client && npm run dev   # Vite على 5173 مع proxy إلى 8096
+# تثبيت حزم واجهة الويب
+cd ../client
+npm install
 ```
 
-### متغيرات البيئة
-
-```env
-PORT=8096
-MOVIES_PATH=D:\Media\Movies
-SHOWS_PATH=D:\Media\Shows
-MUSIC_PATH=D:\Media\Music
-POSTERS_PATH=D:\Media\Posters
-TMDB_API_KEY=your_key  # اختياري، للجلب اليدوي
+### 3. تشغيل وضع التطوير (Development Mode)
+```bash
+# تشغيل الخادم والواجهة معاً
+npm run dev
 ```
+- واجهة الويب ستعمل على: `http://localhost:5173`
+- خادم الـ API والبث سيعمل على: `http://localhost:8096`
+
+### 4. بناء نسخة الإنتاج (Production Build)
+```bash
+npm run build
+```
+سيتم بناء واجهة الويب ووضعها داخل مجلد `client/dist/` ليعمل الخادم على تقديمها مباشرة دون الحاجة لخادم تطوير منفصل.
 
 ---
 
-## 📡 API Contract
+## 📱 تطبيق الأندرويد (Android Client)
 
-```
-GET  /api/library/landing       # إحصائيات + backdrops
-GET  /api/library/movies-home   # continueWatching, recentlyAdded, collections
-GET  /api/library/music-home
-
-GET  /api/movies /api/movies/:id
-GET  /api/series /api/series/:id /api/series/:id/seasons /api/episodes/:id/next-up
-GET  /api/artists /api/artists/:id /api/albums /api/albums/:id /api/tracks
-GET  /api/images/:type/:id  POST /api/images/:type/:id/upload  DELETE /api/images/:id
-GET  /api/image/:id/full  GET /api/image/:id/thumb
-GET  /api/stream/movie/:id  GET /api/stream/episode/:id  GET /api/stream/track/:id (Range 206)
-POST /api/playback  GET /api/playback/continue  DELETE /api/playback/:type/:id
-GET/POST/DELETE /api/ratings/:type/:id
-GET/POST /api/tags + assign/unassign
-GET/POST /api/collections  POST /api/collections/:id/items
-GET/POST /api/playlists  POST /api/playlists/:id/items  POST /api/playlists/:id/reorder
-GET  /api/search?q=&type=movie|series|track|all
-POST /api/scan
-GET  /api/metadata/tmdb/search?q=  POST /api/metadata/tmdb/apply
-```
+- مبني بدعم أحدث معايير Google Material 3 و Jetpack Compose.
+- يدعم البث الهجين (Hybrid Web & ExoPlayer Media3 Direct Stream).
+- **اكتشاف تلقائي للخادم:** يقوم التطبيق بالبحث في الشبكة المحلية عبر بروتوكول UDP عن خادم ARN Stream المتصل تلقائياً.
+- **مسح كود الاستجابة السريعة (QR Code):** يمكن تصوير باركود الشاشة من جهاز الكمبيوتر للربط المباشر.
+- **البناء التلقائي (CI/CD):** يتم بناء ملفات الـ APK تلقائياً عبر GitHub Actions وإصدارها في قسم Releases.
 
 ---
 
-## 🖼️ تسمية المجلدات (مهم)
+## 🛡️ الأمان والتوقيع الرقمي (Code Signing)
 
-```
-D:\Media\Movies\Inception (2010)\Inception.2010.1080p.mkv  + poster.jpg / backdrop.jpg
-D:\Media\Shows\Breaking Bad\Season 01\S01E01.mkv  + poster.jpg (داخل Season)
-D:\Media\Music\Pink Floyd\The Wall\01 - Track.mp3  + cover.jpg
-D:\Media\Posters\Inception (2010).jpg
-```
-
-- `poster.jpg|folder.jpg|cover.jpg` — بوستر
-- `backdrop.jpg|fanart.jpg|background.jpg` — خلفية
-- `SXXEXX.mkv` إلزامي للحلقات
-- `Season XX` إلزامي للمواسم
+كافة الحزم والملفات التنفيذية لمشاريع شركة **ARN Technology** موقعة رقمياً بشهادة معتمدة وطابع زمني **RFC-3161** لضمان الأصالة والأمان التام، وتخطي حماية **Windows 11 Smart App Control** و SmartScreen بدون أي تحذيرات أمنية.
 
 ---
 
-## ✅ معايير النجاح (تم التحقق)
+## 📞 التواصل والدعم الفني (Contact & Social Links)
 
-- [x] Landing يعرض كرتين مع إحصائيات حية
-- [x] فحص 3500+ ملف بدون انهيار (معاملات SQLite + حد 4 ffprobe)
-- [x] Movies UI صفوف بوسترات + Continue Watching
-- [x] Music UI فنانين/ألبومات + MiniPlayer ثابت
-- [x] تشغيل فيديو Direct Play مع Range Requests + موسيقى مع cover
-- [x] Next Up في آخر 10 ثواني للحلقة
-- [x] مبدّل لغة عربي/إنجليزي مع RTL كامل
-- [x] Ratings نصف نجمة + Tags مع ألوان
-- [x] Collections + Playlists متسلسلة
-- [x] كل النصوص قابلة للترجمة (لا نصوص ثابتة)
+للتواصل مع المطور ومؤسس شركة **ARN Technology**:
+
+- 👤 **المطور:** عبده رجب نصار (Abdou Ragab Nassar)
+- 🟢 **WhatsApp:** [+201556710314](https://wa.me/201556710314)
+- ✈️ **Telegram:** [@ABDOURNASSAR95](https://t.me/ABDOURNASSAR95)
+- 🌐 **Facebook:** [abdouragab.nassar](https://www.facebook.com/abdouragab.nassar)
+- 💬 **Messenger:** [abdouragab.nassar](https://m.me/abdouragab.nassar)
 
 ---
 
-## 🔐 تحذيرات حرجة (تم تطبيقها)
+## 📜 الترخيص وحقوق الملكية (License)
 
-- مسارات Windows عبر `path.join`
-- ffprobe بحد 4 عمليات متوازية
-- صور sharp مضغوطة 500px (بوستر) + thumb 300px
-- إزالة تكرار الصور بـ MD5
-- معاملات SQLite مجمعة
-
----
-
-## 📜 الترخيص
-محلي فقط — لا وصول عن بعد. Metadata provided by TMDB.
+حقوق النشر (c) 2026 لشركة **ARN Technology**. جميع الحقوق محفوظة للمطور عبده رجب نصار.
+يُمنع استخدام هذا البرنامج أو إعادة توزيعه أو تعديله تجارياً دون إذن كتابي مسبق.

@@ -37,3 +37,20 @@ client/vite.config.js.timestamp-*.mjs
 Thumbs.db
 *.swp
 *.swo
+.idea/
+*.suo
+*.user
+
+# Android artifacts & build
+.gradle/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/.aistudio/
+android/*.iml
+android/app/*.iml
+*.apk
+*.aab
+
