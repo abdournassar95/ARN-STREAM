@@ -131,14 +131,14 @@ object MediaRepository {
             val res = ApiClient.apiService.getSeriesDetails(id)
             if (res.data != null) {
                 val baseSeries = res.data
-                // Ensure seasons have episodes
                 val enrichedSeasons = if (baseSeries.seasons.isNotEmpty()) {
                     baseSeries.seasons.map { season ->
-                        if (season.episodes.isEmpty()) {
+                        if (season.episodes.isEmpty() && season.id > 0) {
                             try {
-                                val epRes = ApiClient.apiService.getSeasonEpisodes(id, season.seasonNumber)
-                                if (!epRes.data.isNullOrEmpty()) {
-                                    season.copy(episodes = epRes.data, episodesCount = epRes.data.size)
+                                val sRes = ApiClient.apiService.getSeasonDetails(season.id)
+                                val eps = sRes.data?.episodes ?: emptyList()
+                                if (eps.isNotEmpty()) {
+                                    season.copy(episodes = eps, episodesCount = eps.size)
                                 } else {
                                     season
                                 }
@@ -149,19 +149,7 @@ object MediaRepository {
                             season
                         }
                     }
-                } else {
-                    // Try fetching Season 1 at least
-                    try {
-                        val epRes = ApiClient.apiService.getSeasonEpisodes(id, 1)
-                        if (!epRes.data.isNullOrEmpty()) {
-                            listOf(Season(id = 1, seasonNumber = 1, title = "الموسم 1", episodesCount = epRes.data.size, episodes = epRes.data))
-                        } else {
-                            emptyList()
-                        }
-                    } catch (_: Exception) {
-                        emptyList()
-                    }
-                }
+                } else emptyList()
 
                 val merged = if (cached != null) {
                     baseSeries.copy(
@@ -307,7 +295,8 @@ object MediaRepository {
             var rawTracks: List<Track> = emptyList()
             try {
                 val trkRes = ApiClient.apiService.getArtistTracks(artistId)
-                if (!trkRes.data.isNullOrEmpty()) rawTracks = trkRes.data
+                val items = trkRes.data?.items
+                if (!items.isNullOrEmpty()) rawTracks = items
             } catch (_: Exception) {}
 
             if (rawTracks.isEmpty()) {
@@ -682,10 +671,15 @@ object MediaRepository {
         try {
             val payload = mapOf(
                 "targetDeviceId" to targetDeviceId,
-                "mediaType" to mediaType,
-                "mediaId" to mediaId,
-                "title" to (title ?: ""),
-                "position" to positionSec,
+                "fromDeviceId" to getDeviceId(),
+                "fromDeviceName" to "${Build.MANUFACTURER} ${Build.MODEL}",
+                "media" to mapOf(
+                    "type" to mediaType,
+                    "id" to mediaId,
+                    "title" to (title ?: ""),
+                    "currentTime" to positionSec,
+                    "position" to positionSec
+                ),
                 "action" to "play"
             )
             val res = ApiClient.apiService.transferPlayback(payload)

@@ -54,3 +54,7 @@ android/app/*.iml
 *.apk
 *.aab
 
+
+# Database backups
+backups/
+*.db

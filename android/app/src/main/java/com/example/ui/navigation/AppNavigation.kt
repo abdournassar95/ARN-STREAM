@@ -73,7 +73,7 @@ fun ArnStreamAppNavigation(preferencesManager: PreferencesManager) {
             ConnectScreen(
                 preferencesManager = preferencesManager,
                 onConnected = {
-                    navController.navigate("web") {
+                    navController.navigate("login") {
                         popUpTo("connect") { inclusive = true }
                     }
                 }
@@ -85,6 +85,11 @@ fun ArnStreamAppNavigation(preferencesManager: PreferencesManager) {
                 preferencesManager = preferencesManager,
                 onSwitchServer = {
                     navController.navigate("connect") {
+                        popUpTo("web") { inclusive = true }
+                    }
+                },
+                onSwitchToNative = {
+                    navController.navigate("home") {
                         popUpTo("web") { inclusive = true }
                     }
                 }

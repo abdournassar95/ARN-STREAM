@@ -64,11 +64,8 @@ interface ArnApiService {
     @GET("api/series/episodes/{id}")
     suspend fun getEpisodeDetails(@Path("id") id: Int): ApiResponse<Episode>
 
-    @GET("api/series/{id}/season/{seasonNumber}")
-    suspend fun getSeasonEpisodes(
-        @Path("id") seriesId: Int,
-        @Path("seasonNumber") seasonNumber: Int
-    ): ApiResponse<List<Episode>>
+    @GET("api/series/seasons/{seasonId}")
+    suspend fun getSeasonDetails(@Path("seasonId") seasonId: Int): ApiResponse<Season>
 
     // Artists, Albums, Quran Recitations
     @GET("api/artists")
@@ -81,11 +78,11 @@ interface ArnApiService {
     @GET("api/artists/{id}")
     suspend fun getArtistDetails(@Path("id") artistId: Int): ApiResponse<Artist>
 
-    @GET("api/artists/{id}/albums")
-    suspend fun getArtistAlbums(@Path("id") artistId: Int): ApiResponse<List<Album>>
+    @GET("api/albums")
+    suspend fun getArtistAlbums(@Query("artist_id") artistId: Int): ApiResponse<List<Album>>
 
-    @GET("api/artists/{id}/tracks")
-    suspend fun getArtistTracks(@Path("id") artistId: Int): ApiResponse<List<Track>>
+    @GET("api/tracks")
+    suspend fun getArtistTracks(@Query("artist_id") artistId: Int): ApiResponse<TracksWrapper>
 
     @GET("api/albums")
     suspend fun getAlbums(

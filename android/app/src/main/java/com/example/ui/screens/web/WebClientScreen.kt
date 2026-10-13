@@ -61,7 +61,8 @@ private fun Context.findActivity(): Activity? {
 @Composable
 fun WebClientScreen(
     preferencesManager: PreferencesManager,
-    onSwitchServer: () -> Unit
+    onSwitchServer: () -> Unit,
+    onSwitchToNative: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
@@ -469,6 +470,23 @@ fun WebClientScreen(
                     Icon(Icons.Default.Refresh, contentDescription = null, tint = ArnEmeraldPrimary)
                     Spacer(modifier = Modifier.width(16.dp))
                     Text("تحديث الصفحة", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                }
+
+                // Switch to Native App Mode
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable {
+                            showMenuSheet = false
+                            onSwitchToNative()
+                        }
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.PhoneAndroid, contentDescription = null, tint = ArnEmeraldPrimary)
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Text("التبديل إلى الواجهة الأصلية (Native App)", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                 }
 
                 // Switch Server

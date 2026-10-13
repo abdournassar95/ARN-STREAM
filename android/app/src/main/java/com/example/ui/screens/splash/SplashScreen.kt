@@ -44,8 +44,13 @@ fun SplashScreen(
     LaunchedEffect(Unit) {
         val savedUrl = preferencesManager.serverUrl.firstOrNull()
         if (!savedUrl.isNullOrEmpty()) {
+            val savedToken = preferencesManager.authToken.firstOrNull()
             delay(500)
-            onNavigateNext("web")
+            if (!savedToken.isNullOrEmpty()) {
+                onNavigateNext("home")
+            } else {
+                onNavigateNext("login")
+            }
         } else {
             delay(1000)
             onNavigateNext("connect")
