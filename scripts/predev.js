@@ -29,6 +29,9 @@ function freePortWindows(port) {
 }
 
 if (process.platform === 'win32') {
+  try {
+    execSync('taskkill /F /IM ARN_Stream.exe', { stdio: 'ignore' });
+  } catch {}
   for (const port of PORTS) {
     freePortWindows(port);
   }

@@ -15,6 +15,9 @@ import RemoteControlBanner from './components/shared/RemoteControlBanner.jsx';
 import FullRemoteControlModal from './components/shared/FullRemoteControlModal.jsx';
 import MiniPlayer from './components/music/MiniPlayer.jsx';
 import SplashScreen from './components/shared/SplashScreen.jsx';
+import { syncAuthCookie } from './api/client.js';
+
+syncAuthCookie();
 
 // Safely import lazy components with automatic page reload if chunk hash changed after an update
 const lazyRetry = (componentImport) =>

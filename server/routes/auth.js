@@ -146,6 +146,12 @@ router.post('/setup', requireSetupMode, async (req, res) => {
     } catch {}
 
     const token = generateToken(admin);
+    res.cookie('arn_auth_token', token, {
+      path: '/',
+      httpOnly: false,
+      sameSite: 'lax',
+      maxAge: 30 * 24 * 60 * 60 * 1000
+    });
     res.json({
       data: {
         token,
@@ -241,6 +247,13 @@ router.post('/login', async (req, res) => {
     const safeUser = findUserById(user.id);
     const token = generateToken(safeUser);
 
+    res.cookie('arn_auth_token', token, {
+      path: '/',
+      httpOnly: false,
+      sameSite: 'lax',
+      maxAge: 30 * 24 * 60 * 60 * 1000
+    });
+
     res.json({
       data: {
         token,
@@ -252,6 +265,15 @@ router.post('/login', async (req, res) => {
     console.error('[Auth Login Error]', err);
     res.status(500).json({ error: { code: 'LOGIN_FAILED', message: err.message } });
   }
+});
+
+/**
+ * POST /api/auth/logout
+ * Clears session cookie
+ */
+router.post('/logout', (req, res) => {
+  res.clearCookie('arn_auth_token', { path: '/' });
+  res.json({ data: { success: true } });
 });
 
 /**

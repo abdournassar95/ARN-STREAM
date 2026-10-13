@@ -11,11 +11,14 @@ import db, {
   deleteLibrary
 } from '../db.js';
 import { scanLibrary } from '../scanner/media-scanner.js';
-import { requireAdmin } from '../services/auth.js';
+import { requireAdmin, requireAuth } from '../services/auth.js';
 import { processAndCacheImage } from '../services/image-cache.js';
 
 const upload = multer({ dest: path.join(getDataDir(), 'tmp_uploads') });
 const router = express.Router();
+
+// Require authentication for all library operations
+router.use(requireAuth);
 
 // GET all libraries (optionally filter non-empty and by user allowed_libraries)
 router.get('/', (req, res) => {

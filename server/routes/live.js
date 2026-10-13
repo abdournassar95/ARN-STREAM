@@ -1,8 +1,11 @@
 import express from 'express';
 import db, { getSetting, setSetting } from '../db.js';
-import { requireAdmin } from '../services/auth.js';
+import { requireAdmin, requireAuth } from '../services/auth.js';
 
 const router = express.Router();
+
+// Require authentication for Live TV
+router.use(requireAuth);
 
 const DEFAULT_FG_CODE = '232425';
 

@@ -2,10 +2,13 @@ import express from 'express';
 import db from '../db.js';
 import { probeMedia } from '../services/ffmpeg-manager.js';
 import { scanSingleSeries, scanSingleSeason } from '../scanner/media-scanner.js';
-import { requireAdmin } from '../services/auth.js';
+import { requireAdmin, requireAuth } from '../services/auth.js';
 import { deleteRecord } from '../services/database-manager.js';
 
 const router = express.Router();
+
+// Require authentication for all series endpoints
+router.use(requireAuth);
 
 router.get('/', (req, res) => {
   const { q, library_id, limit = 200, offset = 0, tags } = req.query;

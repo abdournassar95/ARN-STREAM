@@ -1,18 +1,17 @@
-# ARN Stream - PowerShell Dev Launcher
-$node = "node"
+﻿[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-# 1. البحث عن Node.js (النظامي أولاً ثم المدمج في البرنامج المثبت)
-$nodeCmd = Get-Command node -ErrorAction SilentlyContinue
-if ($nodeCmd) {
-    $node = $nodeCmd.Source
-} else {
-    $fallbackNode = "C:\Program Files\ARN Stream\bin\node.exe"
-    if (Test-Path $fallbackNode) {
-        $node = $fallbackNode
-    } else {
-        Write-Host "[X] لم يتم العثور على Node.js في النظام أو في مسار التثبيت." -ForegroundColor Red
-        return
+# Ensure Administrator privileges so previous elevated processes on 8096 can be killed
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    Write-Host "[i] جاري طلب صلاحيات المسؤول لتحرير المنافذ وبدء بيئة التطوير..." -ForegroundColor Yellow
+    $argList = @("-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PSCommandPath)
+    try {
+        Start-Process powershell.exe -ArgumentList $argList -Verb RunAs
+    } catch {
+        Write-Host "[X] تم إلغاء طلب صلاحيات المسؤول." -ForegroundColor Red
+        Read-Host "اضغط Enter للخروج"
     }
+    exit
 }
 
 Write-Host "==========================================================" -ForegroundColor Cyan
@@ -20,25 +19,44 @@ Write-Host "   ARN Stream - تشغيل بيئة التطوير (Server + Fronten
 Write-Host "   تطوير وبرمجة: عبده رجب نصار - ARN Technology           " -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Cyan
 
+# 1. إيقاف مشغل ARN_Stream المثبت لتفادي حجز المنفذ في الخلفية
+Write-Host "`n[1/3] إيقاف مشغل النظام في الخلفية (ARN_Stream)..." -ForegroundColor Cyan
+Get-Process -Name "ARN_Stream" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 800
+
 # 2. إيقاف أي عملية تشغل المنفذين 8096 أو 5173
+Write-Host "[2/3] تحرير المنفذين 8096 و 5173..." -ForegroundColor Cyan
 @(8096, 5173) | ForEach-Object {
     $p = $_
     Get-NetTCPConnection -LocalPort $p -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object {
         if ($_ -gt 0) {
-            Write-Host "  [i] تحرير المنفذ $p من العملية السابقة (PID: $_)..." -ForegroundColor Yellow
+            Write-Host "  - تحرير المنفذ $p من العملية (PID: $_)..." -ForegroundColor Yellow
             Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue
         }
     }
 }
+Start-Sleep -Milliseconds 800
 
-Write-Host "`n[1/2] جاري تشغيل سيرفر الباك إند (Port: 8096)..." -ForegroundColor Cyan
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "& '$node' index.js" -WorkingDirectory "$PSScriptRoot\server"
+$workspace = $PSScriptRoot
+$serverDir = Join-Path $workspace "server"
+$clientDir = Join-Path $workspace "client"
 
-Write-Host "[2/2] جاري تشغيل واجهة التطوير (Vite على Port: 5173)..." -ForegroundColor Cyan
-Write-Host "`n💡 افتح المتصفح على رابط التطوير: http://localhost:5173`n" -ForegroundColor Green
-Set-Location "$PSScriptRoot\client"
-if (Test-Path "node_modules\vite\bin\vite.js") {
-    & $node "node_modules\vite\bin\vite.js" --port 5173 --host
-} else {
+# 3. تشغيل سيرفر الباك إند في نافذة منفصلة
+Write-Host "`n[3/3] جاري تشغيل سيرفر الباك إند (Port: 8096)..." -ForegroundColor Cyan
+$serverCmd = "Set-Location -LiteralPath '$serverDir'; npm run dev"
+Start-Process powershell.exe -ArgumentList @("-NoExit", "-ExecutionPolicy", "Bypass", "-Command", $serverCmd)
+
+# 4. تشغيل واجهة التطوير (Vite) في هذه النافذة
+Write-Host "----------------------------------------------------------" -ForegroundColor DarkGray
+Write-Host "  خادم الباك إند يعمل الآن على المنفذ 8096 في نافذة منفصلة." -ForegroundColor Green
+Write-Host "  جاري تشغيل واجهة التطوير الحية (Vite)..." -ForegroundColor Cyan
+Write-Host "  الرابط: http://localhost:5173" -ForegroundColor Yellow
+Write-Host "----------------------------------------------------------`n" -ForegroundColor DarkGray
+
+Set-Location -LiteralPath $clientDir
+try {
     npm run dev
+} finally {
+    Write-Host "`nتم إيقاف خادم الواجهة." -ForegroundColor Yellow
+    Read-Host "اضغط Enter للإغلاق"
 }

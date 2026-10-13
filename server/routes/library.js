@@ -1,8 +1,12 @@
 import express from 'express';
 import fs from 'fs';
 import db, { getAllLibraries } from '../db.js';
+import { requireAuth } from '../services/auth.js';
 
 const router = express.Router();
+
+// Require authentication for all library views
+router.use(requireAuth);
 
 router.get('/landing', (req, res) => {
   let libraries = getAllLibraries(false);

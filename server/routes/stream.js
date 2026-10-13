@@ -4,9 +4,12 @@ import path from 'path';
 import db from '../db.js';
 import { probeMedia, determineStreamStrategy, streamWithFFmpeg } from '../services/ffmpeg-manager.js';
 import { getLocalSubtitles } from '../services/subtitles.js';
-import { requireAdmin } from '../services/auth.js';
+import { requireAdmin, requireAuth } from '../services/auth.js';
 
 const router = express.Router();
+
+// Require authentication for all video and audio streams
+router.use(requireAuth);
 
 /**
  * Direct file streaming with HTTP 206 Partial Content (Byte Ranges)

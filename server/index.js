@@ -80,7 +80,7 @@ import databaseRouter from './routes/database.js';
 import liveRouter from './routes/live.js';
 import subtitlesRouter from './routes/subtitles.js';
 import watchPartyRouter from './routes/watch-party.js';
-import { optionalAuth } from './services/auth.js';
+import { optionalAuth, requireAuth, requireAdmin, getInternalKey } from './services/auth.js';
 import { responseCacheMiddleware, invalidateCache } from './middleware/response-cache.js';
 import {
   startDlna,
@@ -225,7 +225,7 @@ app.use('/api/playlists', playlistsRouter);
 // Smart Predictive Search with Arabic normalization, ranked relevance, and rich thumbnails
 import { normalizeArabic } from './db.js';
 
-app.get('/api/search', (req, res) => {
+app.get('/api/search', requireAuth, (req, res) => {
   const { q, type = 'all', limit = 20 } = req.query;
   if (!q || !q.trim()) return res.json({ data: [], prediction: null });
 
@@ -425,9 +425,54 @@ import { scanAll } from './scanner/media-scanner.js';
 import { scanImages } from './scanner/image-scanner.js';
 import { cleanMissingFiles, cleanOrphanedData } from './services/database-manager.js';
 
-import { requireAdmin, requireAuth } from './services/auth.js';
+app.post('/api/scan', (req, res, next) => {
+  const clientIp = req.ip || req.connection?.remoteAddress || '';
+  const isLoopback = clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === '::ffff:127.0.0.1' || req.hostname === 'localhost' || req.hostname === '127.0.0.1';
+  const hasNoExternalOrigin = !req.headers.origin && !req.headers.referer;
+  const internalKey = req.headers['x-arn-internal-key'];
 
-app.post('/api/scan', requireAdmin, async (req, res) => {
+  // Automatically authenticate if request is from local desktop system tray
+  if (isLoopback && ((internalKey && internalKey === getInternalKey()) || hasNoExternalOrigin)) {
+    req.user = { id: 1, username: 'admin', role: 'admin', is_active: 1, isInternal: true };
+    return next();
+  }
+  requireAdmin(req, res, next);
+}, async (req, res) => {
+  const isAsync = req.query.async === 'true' || req.headers['x-async'] === 'true' || Boolean(req.user?.isInternal);
+
+  if (isAsync) {
+    // Respond immediately to prevent HTTP client timeouts (e.g. desktop tray icon)
+    res.json({
+      data: {
+        status: 'started',
+        message: 'تم بدء فحص ومزامنة المكتبة في الخلفية...'
+      }
+    });
+
+    // Run scanning asynchronously in background
+    (async () => {
+      try {
+        await scanAll();
+        await scanImages();
+        cleanMissingFiles(false);
+        cleanOrphanedData();
+
+        invalidateCache('/api/library');
+        invalidateCache('/api/movies');
+        invalidateCache('/api/series');
+        invalidateCache('/api/artists');
+        invalidateCache('/api/albums');
+        invalidateCache('/api/tracks');
+        invalidateCache('/api/collections');
+        invalidateCache('/api/playlists');
+        invalidateCache('/api/libraries');
+      } catch (err) {
+        console.error('[Scan] Background scan error:', err.message);
+      }
+    })();
+    return;
+  }
+
   try {
     const mediaStats = await scanAll();
     const imageStats = await scanImages();

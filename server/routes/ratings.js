@@ -1,15 +1,15 @@
 import express from 'express';
 import db from '../db.js';
-import { optionalAuth } from '../services/auth.js';
+import { requireAuth } from '../services/auth.js';
 
 const router = express.Router();
 
 function getEffectiveUserId(req) {
-  // Require authenticated user - no zero-users bypass
   return req.user?.id || null;
 }
 
-router.use(optionalAuth);
+// Require authentication for ratings
+router.use(requireAuth);
 
 router.get('/:type/:id', (req, res) => {
   const userId = getEffectiveUserId(req);

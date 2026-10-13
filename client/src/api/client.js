@@ -5,10 +5,21 @@ const client = axios.create({
   timeout: 15000
 });
 
+export function syncAuthCookie() {
+  try {
+    const token = localStorage.getItem('arn_auth_token');
+    if (token) {
+      document.cookie = `arn_auth_token=${encodeURIComponent(token)}; path=/; max-age=2592000; SameSite=Lax`;
+    }
+  } catch (e) {}
+}
+syncAuthCookie();
+
 client.interceptors.request.use((config) => {
   const token = localStorage.getItem('arn_auth_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+    syncAuthCookie();
   }
   return config;
 });
@@ -20,6 +31,9 @@ client.interceptors.response.use(
       // Don't auto-redirect if checking status
       if (!err.config?.url?.includes('/auth/status')) {
         localStorage.removeItem('arn_auth_token');
+        try {
+          document.cookie = 'arn_auth_token=; path=/; max-age=0; SameSite=Lax';
+        } catch (e) {}
         window.location.href = '/login';
       }
     }

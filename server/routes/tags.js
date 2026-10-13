@@ -1,7 +1,10 @@
 import express from 'express';
 import db from '../db.js';
-import { requireAdmin } from '../services/auth.js';
+import { requireAdmin, requireAuth } from '../services/auth.js';
 const router = express.Router();
+
+// Require authentication for tags
+router.use(requireAuth);
 
 router.get('/', (req, res) => {
   const tags = db.prepare(`SELECT * FROM tags ORDER BY usage_count DESC, name`).all();

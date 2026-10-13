@@ -1,7 +1,10 @@
 import express from 'express';
 import db from '../db.js';
-import { requireAdmin } from '../services/auth.js';
+import { requireAdmin, requireAuth } from '../services/auth.js';
 const router = express.Router();
+
+// Require authentication for collections
+router.use(requireAuth);
 
 router.get('/', (req, res) => {
   const cols = db.prepare(`SELECT * FROM collections ORDER BY sort_order, created_at DESC`).all();

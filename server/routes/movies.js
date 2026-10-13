@@ -1,10 +1,13 @@
 import express from 'express';
 import db from '../db.js';
 import { probeMedia } from '../services/ffmpeg-manager.js';
-import { requireAdmin } from '../services/auth.js';
+import { requireAdmin, requireAuth } from '../services/auth.js';
 import { deleteRecord } from '../services/database-manager.js';
 
 const router = express.Router();
+
+// Require authentication for all movie endpoints
+router.use(requireAuth);
 
 function attachImages(movies) {
   return movies.map(m => {

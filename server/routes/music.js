@@ -1,10 +1,13 @@
 import express from 'express';
 import db from '../db.js';
-import { requireAdmin } from '../services/auth.js';
+import { requireAdmin, requireAuth } from '../services/auth.js';
 import { scanSingleArtist, scanSingleAlbum } from '../scanner/media-scanner.js';
 import { deleteRecord } from '../services/database-manager.js';
 
 const router = express.Router();
+
+// Require authentication for all music/audio endpoints
+router.use(requireAuth);
 
 // Artists
 router.get('/artists', (req, res) => {

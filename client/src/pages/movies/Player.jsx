@@ -35,6 +35,19 @@ import { useSettingsStore } from '../../store/useSettingsStore';
 import { useDeviceHandoffStore } from '../../store/useDeviceHandoffStore';
 import { useAuthStore } from '../../store/useAuthStore';
 
+const getAuthToken = () => {
+  return localStorage.getItem('arn_auth_token') || '';
+};
+
+const authFetch = (url, options = {}) => {
+  const token = getAuthToken();
+  const headers = { ...(options.headers || {}) };
+  if (token && !headers['Authorization']) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return fetch(url, { ...options, headers });
+};
+
 function formatTime(seconds) {
   if (!seconds || isNaN(seconds) || seconds < 0) return '00:00';
   const s = Math.floor(seconds);
@@ -240,6 +253,48 @@ export default function Player() {
     }
   }, [id, type, videoQueue, videoQueueIndex, setVideoQueueIndex, clearVideoQueue]);
 
+  const isNavigatingHomeRef = useRef(false);
+  useEffect(() => {
+    isNavigatingHomeRef.current = false;
+  }, [id, type]);
+
+  const showFeedbackBadge = useCallback((text, icon = null) => {
+    setFeedback({ text, icon });
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    feedbackTimerRef.current = setTimeout(() => setFeedback(null), 850);
+  }, []);
+
+  const returnToLibraryHome = useCallback(async () => {
+    if (isNavigatingHomeRef.current) return;
+    isNavigatingHomeRef.current = true;
+
+    showFeedbackBadge(
+      isRtl ? 'اكتمل العرض • جاري العودة للمكتبات...' : 'Playback finished • Returning to Home...',
+      Check
+    );
+
+    setTimeout(async () => {
+      if (document.fullscreenElement) {
+        try {
+          await document.exitFullscreen();
+        } catch {}
+      }
+
+      clearVideoQueue();
+
+      try {
+        await client.delete(`/playback/${type}/${id}`);
+      } catch {}
+
+      navigate('/', { replace: true });
+    }, 1100);
+  }, [isRtl, showFeedbackBadge, type, id, clearVideoQueue, navigate]);
+
+  const returnToLibraryHomeRef = useRef(returnToLibraryHome);
+  useEffect(() => {
+    returnToLibraryHomeRef.current = returnToLibraryHome;
+  }, [returnToLibraryHome]);
+
   const handleNextVideo = useCallback(() => {
     const nextVid = isCurrentInQueue ? getNextVideo() : null;
     if (nextVid) {
@@ -249,6 +304,8 @@ export default function Player() {
     } else if (nextUp && nextUp.id) {
       const targetType = getItemType(nextUp, type);
       navigate(`/watch/${targetType}/${nextUp.id}`, { replace: true });
+    } else {
+      returnToLibraryHomeRef.current?.();
     }
   }, [getNextVideo, advanceToNextVideo, navigate, nextUp, type, isCurrentInQueue]);
 
@@ -266,15 +323,20 @@ export default function Player() {
     }
   }, [getPrevVideo, advanceToPrevVideo, navigate, type, isCurrentInQueue]);
 
-  const src = (streamStrategy?.mode === 'transcode' || streamStrategy?.mode === 'remux') && seekOffset > 0
-    ? `/api/stream/${type}/${id}?start=${Math.floor(seekOffset)}`
-    : `/api/stream/${type}/${id}`;
+  const buildStreamUrl = useCallback((params = {}) => {
+    const token = getAuthToken();
+    const q = new URLSearchParams();
+    if (token) q.set('token', token);
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null) q.set(k, String(v));
+    }
+    const qs = q.toString();
+    return qs ? `/api/stream/${type}/${id}?${qs}` : `/api/stream/${type}/${id}`;
+  }, [type, id]);
 
-  const showFeedbackBadge = useCallback((text, icon = null) => {
-    setFeedback({ text, icon });
-    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
-    feedbackTimerRef.current = setTimeout(() => setFeedback(null), 850);
-  }, []);
+  const src = (streamStrategy?.mode === 'transcode' || streamStrategy?.mode === 'remux') && seekOffset > 0
+    ? buildStreamUrl({ start: Math.floor(seekOffset) })
+    : buildStreamUrl();
 
   // Controls auto-hide on inactivity (4s, only hides when playing and menus/drawer closed)
   const resetHideTimer = useCallback(() => {
@@ -348,7 +410,7 @@ export default function Player() {
       setCurrentTime(target);
       const v = videoRef.current;
       if (v) {
-        v.src = `/api/stream/${type}/${id}?start=${Math.floor(target)}&_=${Date.now()}`;
+        v.src = buildStreamUrl({ start: Math.floor(target), _: Date.now() });
         v.play().catch(() => {});
       }
     } else {
@@ -384,7 +446,7 @@ export default function Player() {
     setNextUp(null);
 
     // Fetch stream strategy info (direct vs remux vs transcode)
-    fetch(`/api/stream/info/${type}/${id}`)
+    authFetch(`/api/stream/info/${type}/${id}`)
       .then(r => r.json())
       .then(d => {
         if (d.success && d.data) {
@@ -405,7 +467,7 @@ export default function Player() {
       .catch(() => {});
 
     // Also check local subtitles
-    fetch(`/api/subtitles/${type}/${id}`)
+    authFetch(`/api/subtitles/${type}/${id}`)
       .then(r => r.json())
       .then(subRes => {
         if (subRes.data && Array.isArray(subRes.data) && subRes.data.length > 0) {
@@ -428,7 +490,7 @@ export default function Player() {
       .catch(() => {});
 
     if (type === 'movie') {
-      fetch(`/api/movies/${id}`)
+      authFetch(`/api/movies/${id}`)
         .then(r => r.json())
         .then(d => {
           if (d.data) {
@@ -438,7 +500,7 @@ export default function Player() {
         })
         .catch(() => {});
     } else if (type === 'episode') {
-      fetch(`/api/series/episodes/${id}`)
+      authFetch(`/api/series/episodes/${id}`)
         .then(r => r.json())
         .then(d => {
           if (d.data) {
@@ -464,7 +526,7 @@ export default function Player() {
               const state = usePlayerStore.getState();
               const hasCurrent = state.videoQueue?.some(v => String(v.id) === String(id) && getItemType(v, type) === 'episode');
               if (!hasCurrent && d.data.series_id) {
-                fetch(`/api/series/${d.data.series_id}`)
+                authFetch(`/api/series/${d.data.series_id}`)
                   .then(res => res.json())
                   .then(seriesRes => {
                     const season = seriesRes.data?.seasons?.find(sn => sn.id === d.data.season_id) || seriesRes.data?.seasons?.[0];
@@ -578,7 +640,7 @@ export default function Player() {
             });
           } else if (type === 'episode') {
             const currentInfo = mediaInfoRef.current;
-            fetch(`/api/series/episodes/${id}/next-up`)
+            authFetch(`/api/series/episodes/${id}/next-up`)
               .then(r => r.json())
               .then(j => { 
                 if (j.data) {
@@ -602,7 +664,7 @@ export default function Player() {
 
     const onPlay = () => setIsPlaying(true);
     const onPause = () => setIsPlaying(false);
-    const onEnded = () => {
+    const onEnded = async () => {
       if (type === 'episode') {
         try {
           const watched = JSON.parse(localStorage.getItem('arn_watched_episodes') || '[]');
@@ -612,9 +674,43 @@ export default function Player() {
           }
         } catch {}
       }
-      if (autoPlayNextRef.current) {
-        handleNextVideoRef.current?.();
+
+      // Check if there is an active next video in the queue
+      const nextVid = isCurrentInQueue ? getNextVideo() : null;
+      if (nextVid) {
+        if (autoPlayNextRef.current) {
+          handleNextVideoRef.current?.();
+        }
+        return;
       }
+
+      // Check if nextUp episode/video was pre-fetched
+      if (nextUp && nextUp.id) {
+        if (autoPlayNextRef.current) {
+          handleNextVideoRef.current?.();
+        }
+        return;
+      }
+
+      // If it is an episode and nothing was in queue/nextUp, query backend for any subsequent episode in the series
+      if (type === 'episode') {
+        try {
+          const res = await authFetch(`/api/series/episodes/${id}/next-up`);
+          const j = await res.json();
+          if (j?.data?.id) {
+            if (autoPlayNextRef.current) {
+              const targetType = getItemType(j.data, 'episode');
+              navigate(`/watch/${targetType}/${j.data.id}`, { replace: true });
+            }
+            return;
+          }
+        } catch {}
+      }
+
+      // No upcoming video exists:
+      // Movie ended, or series episodes ended, or playlist ended.
+      // Automatically return to the Library Home page!
+      returnToLibraryHomeRef.current?.();
     };
 
     const onLoaded = () => {
@@ -632,7 +728,7 @@ export default function Player() {
         return;
       }
       // Resume playback position
-      fetch(`/api/playback/continue`)
+      authFetch(`/api/playback/continue`)
         .then(r => r.json())
         .then(j => {
           const found = j.data?.find(p => p.media_type === type && String(p.media_id) === String(id));
@@ -1236,7 +1332,7 @@ export default function Player() {
         {selectedSubtitle?.path ? (
           <track
             kind="subtitles"
-            src={`/api/subtitles/serve?path=${encodeURIComponent(selectedSubtitle.path)}`}
+            src={`/api/subtitles/serve?path=${encodeURIComponent(selectedSubtitle.path)}${getAuthToken() ? `&token=${encodeURIComponent(getAuthToken())}` : ''}`}
             srcLang={selectedSubtitle.language || 'ar'}
             label={selectedSubtitle.title || 'العربية'}
             default

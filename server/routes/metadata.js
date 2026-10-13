@@ -22,8 +22,11 @@ const upload = multer({
   limits: { fileSize: 15 * 1024 * 1024 } // 15MB
 });
 
-import { requireAdmin } from '../services/auth.js';
+import { requireAdmin, requireAuth } from '../services/auth.js';
 import { invalidateCache } from '../middleware/response-cache.js';
+
+// Require authentication for all metadata endpoints
+router.use(requireAuth);
 
 /**
  * Invalidate all related in-memory response caches when media images or metadata change.

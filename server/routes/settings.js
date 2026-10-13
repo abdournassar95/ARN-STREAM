@@ -116,7 +116,7 @@ router.post('/volume', requireAdmin, (req, res) => {
   res.json({ success: true });
 });
 
-router.get('/folders', (req, res) => {
+router.get('/folders', requireAdmin, (req, res) => {
   const categories = ['movies', 'shows', 'music', 'posters'];
   const data = {};
 

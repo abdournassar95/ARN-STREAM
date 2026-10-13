@@ -11,7 +11,8 @@ function canEditPlaylist(pl, req) {
   return false;
 }
 
-router.use(optionalAuth);
+// Require authentication for playlists
+router.use(requireAuth);
 
 router.get('/', (req, res) => {
   const { libraryId } = req.query;

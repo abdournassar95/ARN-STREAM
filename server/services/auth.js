@@ -1,7 +1,30 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import path from 'path';
+import fs from 'fs';
 import db, { getSetting, setSetting, findUserById, countUsers } from '../db.js';
+
+const appData = process.env.APPDATA || (process.platform === 'darwin' ? process.env.HOME + '/Library/Preferences' : process.env.HOME + "/.local/share");
+const internalKeyPath = path.join(appData, 'ARN_Stream', '.internal_key');
+let cachedInternalKey = null;
+
+export function getInternalKey() {
+  if (cachedInternalKey) return cachedInternalKey;
+  try {
+    const dir = path.dirname(internalKeyPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    if (fs.existsSync(internalKeyPath)) {
+      cachedInternalKey = fs.readFileSync(internalKeyPath, 'utf-8').trim();
+    } else {
+      cachedInternalKey = crypto.randomBytes(32).toString('hex');
+      fs.writeFileSync(internalKeyPath, cachedInternalKey, { encoding: 'utf-8' });
+    }
+  } catch (err) {
+    console.error('[Auth] Internal key init error:', err.message);
+  }
+  return cachedInternalKey;
+}
 
 // Get or initialize JWT secret key
 function getJwtSecret() {
@@ -47,10 +70,31 @@ export function verifyToken(token) {
  * Attaches user to req.user if valid.
  */
 export function optionalAuth(req, res, next) {
+  // Check for local desktop application internal key (loopback host authentication)
+  const internalHeader = req.headers['x-arn-internal-key'];
+  const clientIp = req.ip || req.connection?.remoteAddress || '';
+  const isLoopback = clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === '::ffff:127.0.0.1' || req.hostname === 'localhost' || req.hostname === '127.0.0.1';
+  if (internalHeader && isLoopback) {
+    const validKey = getInternalKey();
+    if (validKey && internalHeader === validKey) {
+      req.user = { id: 1, username: 'admin', role: 'admin', is_active: 1, isInternal: true };
+      return next();
+    }
+  }
+
   const authHeader = req.headers['authorization'];
   const bearerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
   const queryToken = req.query?.token;
-  const token = bearerToken || queryToken;
+  let cookieToken = null;
+  if (req.cookies?.arn_auth_token) {
+    cookieToken = req.cookies.arn_auth_token;
+  } else if (req.headers.cookie) {
+    const match = req.headers.cookie.match(/(?:^|;\s*)arn_auth_token=([^;]+)/);
+    if (match) {
+      cookieToken = decodeURIComponent(match[1]);
+    }
+  }
+  const token = bearerToken || queryToken || cookieToken;
 
   if (!token) {
     req.user = null;
@@ -66,6 +110,16 @@ export function optionalAuth(req, res, next) {
   const user = findUserById(decoded.id);
   if (user && user.is_active) {
     req.user = user;
+    if (res && typeof res.cookie === 'function' && !cookieToken) {
+      try {
+        res.cookie('arn_auth_token', token, {
+          httpOnly: false,
+          path: '/',
+          maxAge: 30 * 24 * 60 * 60 * 1000,
+          sameSite: 'lax'
+        });
+      } catch (e) {}
+    }
   } else {
     req.user = null;
   }

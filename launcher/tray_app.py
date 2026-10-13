@@ -347,8 +347,16 @@ class PersonalStreamTrayApp:
     def trigger_scan(self):
         def do_scan():
             try:
-                conn = http.client.HTTPConnection('127.0.0.1', SERVER_PORT, timeout=2)
-                conn.request("POST", "/api/scan", body=b"{}", headers={"Content-Type": "application/json"})
+                headers = {"Content-Type": "application/json"}
+                try:
+                    key_file = Path(os.environ.get("APPDATA", ".")) / "ARN_Stream" / ".internal_key"
+                    if key_file.exists():
+                        headers["X-ARN-Internal-Key"] = key_file.read_text(encoding="utf-8").strip()
+                except Exception:
+                    pass
+
+                conn = http.client.HTTPConnection('127.0.0.1', SERVER_PORT, timeout=10)
+                conn.request("POST", "/api/scan?async=true", body=b"{}", headers=headers)
                 resp = conn.getresponse()
                 conn.close()
                 if resp.status == 200:

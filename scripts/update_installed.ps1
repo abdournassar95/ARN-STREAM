@@ -1,10 +1,32 @@
-# ==============================================================================
+﻿# ==============================================================================
 # ARN Stream - Update Installed Version
 # Developer: Abdou Ragab Nassar - ARN Technology
 # ==============================================================================
 
+param(
+    [switch]$NoPrompt
+)
+
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = "Continue"
+
+# Check for Administrator privileges (required to update C:\Program Files\ARN Stream)
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    Write-Host "[i] Requesting Administrator privileges..." -ForegroundColor Yellow
+    Write-Host "    جاري طلب صلاحيات المسؤول لتحديث البرنامج..." -ForegroundColor Yellow
+    $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"")
+    if ($NoPrompt) {
+        $argList += '-NoPrompt'
+    }
+    try {
+        $proc = Start-Process powershell.exe -ArgumentList $argList -Verb RunAs -PassThru -Wait
+        exit $proc.ExitCode
+    } catch {
+        Write-Host "[X] Administrator privilege request was cancelled or denied." -ForegroundColor Red
+        exit 1
+    }
+}
 
 $workspaceRoot = Split-Path -Parent $PSScriptRoot
 $installedPath = "C:\Program Files\ARN Stream"
@@ -20,7 +42,9 @@ if (-not (Test-Path $installedPath)) {
     Write-Host "`n[X] Error: Installed ARN Stream not found at: $installedPath" -ForegroundColor Red
     Write-Host "    لم يتم العثور على البرنامج مثبت في: $installedPath" -ForegroundColor Yellow
     Write-Host ""
-    Read-Host "Press Enter to exit / اضغط Enter للخروج"
+    if (-not $NoPrompt) {
+        Read-Host "Press Enter to exit / اضغط Enter للخروج"
+    }
     return
 }
 
@@ -47,7 +71,7 @@ Write-Host "`n[2/4] Copying updated server code..." -ForegroundColor Cyan
 $serverSrc = Join-Path $workspaceRoot "server"
 
 try {
-    $destDirs = @("scanner", "routes", "services")
+    $destDirs = @("scanner", "routes", "services", "middleware")
     foreach ($d in $destDirs) {
         $destPath = Join-Path $installedServer $d
         if (-not (Test-Path $destPath)) {
@@ -57,6 +81,7 @@ try {
     Copy-Item -Recurse -Force "$serverSrc\scanner\*" "$installedServer\scanner\"
     Copy-Item -Recurse -Force "$serverSrc\routes\*" "$installedServer\routes\"
     Copy-Item -Recurse -Force "$serverSrc\services\*" "$installedServer\services\"
+    Copy-Item -Recurse -Force "$serverSrc\middleware\*" "$installedServer\middleware\"
     Copy-Item -Force "$serverSrc\db.js" "$installedServer\db.js"
     Copy-Item -Force "$serverSrc\index.js" "$installedServer\index.js"
     Copy-Item -Force "$serverSrc\package.json" "$installedServer\package.json"
@@ -142,4 +167,6 @@ Write-Host "     Update applied successfully without affecting data!  " -Foregro
 Write-Host "     تم تحديث البرنامج بنجاح دون المساس ببياناتك أو إعداداتك! " -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host ""
-Read-Host "Press Enter to finish / اضغط Enter للخروج"
+if (-not $NoPrompt) {
+    Read-Host "Press Enter to finish / اضغط Enter للخروج"
+}

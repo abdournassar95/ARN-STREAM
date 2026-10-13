@@ -3,8 +3,12 @@ import fs from 'fs';
 import path from 'path';
 import db from '../db.js';
 import { searchSubtitles, getLocalSubtitles, convertSrtToVtt } from '../services/subtitles.js';
+import { requireAuth } from '../services/auth.js';
 
 const router = express.Router();
+
+// Require authentication for subtitles
+router.use(requireAuth);
 
 // GET /api/subtitles/:type/:id - Get available subtitles for a media item
 router.get('/:type/:id', (req, res) => {
