@@ -1,0 +1,6 @@
+{
+  "name": "ARN Stream",
+  "description": "The official high-performance Android Client for ARN Stream Media Server by ARN Technology (Abdou Ragab Nassar).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
