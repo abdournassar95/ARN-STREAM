@@ -1,22 +1,52 @@
 # 🎬 منصة ARN Stream المتكاملة (خادم وتطبيق بث الوسائط)
 ### ARN Stream — Ultimate Home & Enterprise Media Server & Streaming Ecosystem
 
-> **تطوير وبرمجة:** عبده رجب نصار  
-> **الشركة:** ARN Technology  
-> **حقوق الملكية والنشر:** جميع الحقوق محفوظة (c) 2026 لشركة ARN Technology  
-> **الهوية:** تصميم عصري فاخر (Dark Glassmorphic UI) مع أداء عالي وسرعة استجابة فائقة.
+<div align="center">
+
+![ARN Stream Logo](launcher/assets/icon.png)
+
+**الإصدار:** v2.0.2 • **المطور:** عبده رجب نصار • **الشركة:** ARN Technology  
+**الهوية:** تصميم عصري فاخر (Dark Glassmorphic UI) مع أداء عالي وسرعة استجابة فائقة.
+
+[![Node.js](https://img.shields.io/badge/Node.js-v18%2B-green.svg?logo=node.js)](https://nodejs.org/)
+[![React](https://img.shields.io/badge/React-18-blue.svg?logo=react)](https://react.dev/)
+[![Kotlin](https://img.shields.io/badge/Kotlin-Android_Compose-purple.svg?logo=kotlin)](https://developer.android.com/jetpack/compose)
+[![License](https://img.shields.io/badge/License-ARN_Technology-gold.svg)](LICENSE)
+[![Status](https://img.shields.io/badge/Build-RFC--3161_Signed-success.svg)](build_and_sign.ps1)
+
+</div>
 
 ---
 
 ## 🌟 نظرة عامة عن المنصة (Overview)
 
-منصة **ARN Stream** هي منظومة وسائط ترفيهية متكاملة تجمع بين أفضل تجارب منصات البث العالمية (**Netflix** للأفلام والمسلسلات والمسرحيات والوثائقيات) و(**Spotify** للموسيقى والألبومات والتراكات) وقسم خاص للوسائط الروحية (**القرآن الكريم**)، مع معمارية Direct Play بدون استهلاك زائد لموارد المعالج وبدون الحاجة لمفاتيح API خارجية.
+منصة **ARN Stream** هي منظومة وسائط ترفيهية متكاملة تجمع بين أفضل تجارب منصات البث العالمية (**Netflix** للأفلام والمسلسلات والمسرحيات والوثائقيات) و(**Spotify** للموسيقى والألبومات والتراكات) وقسم خاص للوسائط الروحية (**القرآن الكريم**)، مع معمارية Direct Play فائقة السرعة بدون استهلاك زائد لموارد المعالج وبدون الحاجة لمفاتيح API خارجية.
 
-المنظومة تضم:
-1. 🖥️ **خادم الوسائط الفائق (Backend Media Server):** مبني بـ Node.js و Express مع محرك قواعد بيانات SQLite سريع جداً، وفحص الوسائط عبر FFmpeg/ffprobe وإدارة الكاش الذكي للصور بدقة عالية.
-2. 🌐 **واجهة مستخدم الويب (Web Client UI):** مبنية بـ React 18 و Vite وتنسيقات Tailwind CSS الفاخرة بنمط Glassmorphism ودعم كامل للغة العربية (RTL) والإنجليزية.
-3. 📱 **تطبيق الأندرويد الهجين (Android Native Client):** تطبيق أصلي مبني بتقنيات Jetpack Compose الحديثة و ExoPlayer (Media3)، مع اكتشاف تلقائي للخوادم عبر الشبكة المحلية (UDP Auto-Discovery) والربط السريع عبر QR Code.
-4. 🚀 **مشغل سطح المكتب وحزمة التثبيت (Launcher & Desktop Setup):** سكريبتات تشغيل تلقائية وحزمة تثبيت Inno Setup موقعة رقمياً بشهادة ARN Technology المعتمدة لتخطي حظر Smart App Control و SmartScreen.
+### ✨ الميزات الرئيسية (Core Features)
+
+1. 🖥️ **سينما منزلية للأفلام والمسلسلات (Movies & Series):**
+   - بث مباشر فوري (Direct Play) مع دعم استئناف التشغيل عبر `Range-Requests`.
+   - معالجة الترجمات التلقائية (SRT/VTT) وتحويلها فورياً لـ WebVTT المتوافقة مع المتصفحات.
+   - حفظ تقدم المشاهدة واستئناف التشغيل من نفس الثانية عبر كافة الأجهزة.
+
+2. 🎵 **استوديو الموسيقى والقرآن الكريم (Music & Quran Studio):**
+   - تصفح كامل للألبومات، الفنانين، القراء، والتراكات الصوتية.
+   - **معادل صوت احترافي 10-Band Graphic Equalizer** مدمج في الواجهة مع أكثر من 15 نمطاً جاهزاً (Rock, Pop, Bass Boost, Vocal, Quran Clarity).
+   - قوائم تشغيل مخصصة وقوائم ذكية (الأكثر استماعاً، المشغلة مؤخراً، المفضلة).
+
+3. 📡 **بث القنوات التلفزيونية الحية (Live TV):**
+   - قنوات رياضية وإخبارية وترفيهية مدمجة جاهزة للمشاهدة المباشرة بضغطة زر.
+
+4. 🎮 **التحكم عن بُعد ونقل الجلسات (PlayTo & Device Handoff):**
+   - رصد الأجهزة المتصلة على نفس الحساب في الوقت الفعلي.
+   - نقل المشاهدة الفورية (Handoff) من الحاسوب إلى الهاتف أو العكس دون توقف.
+   - ريموت كنترول تفاعلي كامل للتحكم في الشاشات وأجهزة البث عبر WebSockets و DLNA.
+
+5. 🍿 **حفلات المشاهدة الجماعية المتزامنة (Watch Party):**
+   - إنشاء غرف مشاهدة جماعية مع الأصدقاء برمز دخول آمن ومزامنة بالمللي ثانية عبر WebSockets مع شات نصي زجاجي تفاعلي.
+
+6. 🔍 **محرك بحث تنبؤي ذكي (Smart Predictive Search):**
+   - يدعم تطبيع اللغة العربية (`norm_ar`) ومعالجة التشكيل والهمزات وأل التعريف تلقائياً، مع ترتيب النتائج حسب الصلة.
 
 ---
 
@@ -24,102 +54,93 @@
 
 ```
 ARN-Stream/
-├── android/                   # تطبيق الأندرويد الرسمي (Jetpack Compose + ExoPlayer + WebView)
-│   ├── app/
-│   │   ├── src/main/java/     # شاشات الاتصال، المشغل، والبحث التلقائي
-│   │   ├── src/main/res/      # الأيقونات والثيم الداكن الفاخر
-│   │   └── build.gradle.kts   # إعدادات البناء والتوقيع الرقمي الرسمي
-│   └── gradle/                # حزم ومكتبات أندرويد Gradle
-├── server/                    # خادم الوسائط الخلفي (Node.js / Express / SQLite)
-│   ├── index.js               # نقطة الانطلاق الرئيسية لخادم Express ومنافذ البث
-│   ├── db.js                  # هيكل وتجهيز قاعدة بيانات SQLite فائقة السرعة
-│   ├── scanner/               # محرك فحص المجلدات واستخراج الميتاداتا وفحص التراكات
-│   ├── services/              # خدمات كاش الصور، واستعلامات TMDB التلقائية
-│   └── routes/                # مسارات الـ API (أفلام، مسلسلات، صوتيات، تشغيل، تقييمات)
-├── client/                    # واجهة المستخدم الأمامية (React + Vite + Tailwind CSS)
-│   ├── src/pages/             # شاشات الأفلام، المسلسلات، الموسيقى، والمشغل
-│   ├── src/components/        # المكونات الزجاجية الشفافة، البطاقات، والقوائم
-│   ├── src/i18n/              # الترجمة الكاملة (عربي مع RTL وإنجليزي)
-│   └── package.json           # حزم واجهة الويب
-├── launcher/                  # مشغل سطح المكتب والشاشات المساعدة
-├── scripts/                   # سكريبتات الأتمتة والفحص
-├── cert/                      # شهادات التوثيق الرقمي لـ ARN Technology
-├── .github/workflows/         # خطوط أنابيب GitHub Actions للبناء التلقائي لـ APK
-├── installer.iss              # ملف بناء حزمة التثبيت Inno Setup
-├── build_and_sign.ps1         # سكريبت البناء والتوقيع الرقمي المعتمد RFC-3161
-└── package.json               # إدارة وتشغيل المشروع ككل
+├── docs/                      # 📚 التوثيق المحدث الشامل (المعمارية، الـ API، وتطبيق أندرويد)
+│   ├── ARCHITECTURE.md        # المعمارية الهندسية الشاملة ومخطط قاعدة البيانات
+│   ├── API_REFERENCE.md       # الدليل المرجعي الكامل لمسارات الـ REST API و WebSockets
+│   └── ANDROID_CLIENT.md      # التوثيق الفني لتطبيق الهاتف الأصلي والهجين
+├── client/                    # 🌐 واجهة الويب (React 18 + Vite + Tailwind CSS + Framer Motion)
+│   ├── src/pages/             # شاشات الأفلام، المسلسلات، الموسيقى، والداشبورد
+│   ├── src/components/        # المكونات الزجاجية الشفافة، المشغلات، والقوائم
+│   ├── src/store/             # مخازن الحالات المركزية (Zustand)
+│   └── src/utils/             # محرك معادل الصوت وحسابات الحركة
+├── server/                    # 🚀 خادم الوسائط الخلفي (Node.js / Express / better-sqlite3)
+│   ├── index.js               # نقطة الانطلاق ومسارات البث ومحرك WebSockets
+│   ├── db.js                  # إدارة قاعدة البيانات والبحث والتطبيع العربي
+│   ├── routes/                # مسارات الـ API المنفصلة
+│   ├── services/              # خدمات كاش الصور، النسخ الاحتياطي، وإدارة الجلسات
+│   └── scanner/               # محرك فحص المجلدات واستخراج الميتاداتا
+├── android/                   # 📱 تطبيق الأندرويد الرسمي (Jetpack Compose + ExoPlayer + MLKit QR)
+│   ├── app/src/main/          # شاشات Compose، ريموت الكنترول، ومحرك الاكتشاف التلقائي
+│   └── build.gradle.kts       # إعدادات البناء والتوقيع الرقمي
+├── launcher/                  # 🖥️ مشغل شريط المهام لسطح المكتب (PyQt6 System Tray)
+│   ├── tray_app.py            # تطبيق صينية النظام مع قفل النسخة الواحدة
+│   └── assets/                # أيقونات وخطوط المشغل
+├── backups/                   # 💾 قوالب قواعد البيانات النظيفة (clean_media.db)
+├── cert/                      # 🔐 شهادات التوثيق الرقمي لـ ARN Technology
+├── installer.iss              # 📦 ملف بناء حزمة التثبيت Inno Setup 7
+├── build_and_sign.ps1         # ⚡ سكريبت البناء والتوقيع الرقمي المعتمد RFC-3161
+└── package.json               # إدارة وتشغيل المشروع
 ```
 
 ---
 
-## 🚀 طريقة التثبيت والتشغيل السريع (Quick Start)
+## 📚 وثائق المشروع المتخصصة (Documentation)
 
-### 1. المتطلبات الأساسية
-- **Node.js**: الإصدار 18 أو أحدث (يُفضل 20 LTS).
-- **نظام التشغيل**: Windows 10/11 أو Linux أو macOS.
-- **Android Studio / Android SDK**: (اختياري لبناء تطبيق الهاتف محلياً، كما يتم بناؤه آلياً عبر GitHub Actions).
+للاطلاع على الشروحات الفنية الدقيقة والمحدثة، يرجى مراجعة مجلد [docs/](file:///e:/مشاريعي/ARN-Stream/docs):
+- [المعمارية الهندسية للنظام ومخطط البيانات (ARCHITECTURE.md)](file:///e:/مشاريعي/ARN-Stream/docs/ARCHITECTURE.md)
+- [الدليل المرجعي للـ API و WebSockets و DLNA (API_REFERENCE.md)](file:///e:/مشاريعي/ARN-Stream/docs/API_REFERENCE.md)
+- [دليل تطبيق أندرويد الأصلي والهجين (ANDROID_CLIENT.md)](file:///e:/مشاريعي/ARN-Stream/docs/ANDROID_CLIENT.md)
 
-### 2. تثبيت الحزم (Installation)
-من المجلد الرئيسي للمشروع، قم بتشغيل:
+---
+
+## 🚀 التشغيل السريع لبيئة التطوير (Quick Start)
+
+### 1. تثبيت الحزم (مرة واحدة):
 ```bash
 npm run install:all
 ```
-أو تثبيت كل جزء بشكل منفصل:
-```bash
-# تثبيت حزم الخادم
-cd server
-npm install
 
-# تثبيت حزم واجهة الويب
-cd ../client
-npm install
+### 2. تشغيل بيئة التطوير (Server + Frontend):
+* **عبر PowerShell (موصى به لتفادي تعارض المنافذ):**
+  ```powershell
+  .\run_dev.ps1
+  ```
+* **أو عبر السكربت السريع:**
+  ```cmd
+  run_dev.bat
+  ```
+* **الروابط النشطة:**
+  - واجهة الويب: `http://localhost:5173`
+  - خادم الباك إند: `http://localhost:8096`
+
+---
+
+## 📦 التجميع والبناء للإنتاج (Production Build & Digital Signing)
+
+لتوليد حزمة التثبيت المعتمدة والموقعة رقمياً بخاتم شركة ARN Technology وخوادم الطابع الزمني المعتمدة DigiCert RFC-3161 لتخطي تحذيرات Windows SmartScreen:
+
+```powershell
+.\build_and_sign.ps1
 ```
 
-### 3. تشغيل وضع التطوير (Development Mode)
-```bash
-# تشغيل الخادم والواجهة معاً
-npm run dev
-```
-- واجهة الويب ستعمل على: `http://localhost:5173`
-- خادم الـ API والبث سيعمل على: `http://localhost:8096`
-
-### 4. بناء نسخة الإنتاج (Production Build)
-```bash
-npm run build
-```
-سيتم بناء واجهة الويب ووضعها داخل مجلد `client/dist/` ليعمل الخادم على تقديمها مباشرة دون الحاجة لخادم تطوير منفصل.
+ينتج عن السكربت:
+1. توليد حزمة التثبيت الذاتية في `dist/setup/ARN_Stream_Setup_v2.0.2.exe`.
+2. حزمة ZIP مضغوطة قابلة للتوزيع المباشر.
+3. مزامنة تلقائية للإصدار في مسار الإصدارات: `E:\اصداراتي`.
 
 ---
 
-## 📱 تطبيق الأندرويد (Android Client)
+## 👤 بيانات التواصل والدعم الفني (Developer & Support)
 
-- مبني بدعم أحدث معايير Google Material 3 و Jetpack Compose.
-- يدعم البث الهجين (Hybrid Web & ExoPlayer Media3 Direct Stream).
-- **اكتشاف تلقائي للخادم:** يقوم التطبيق بالبحث في الشبكة المحلية عبر بروتوكول UDP عن خادم ARN Stream المتصل تلقائياً.
-- **مسح كود الاستجابة السريعة (QR Code):** يمكن تصوير باركود الشاشة من جهاز الكمبيوتر للربط المباشر.
-- **البناء التلقائي (CI/CD):** يتم بناء ملفات الـ APK تلقائياً عبر GitHub Actions وإصدارها في قسم Releases.
-
----
-
-## 🛡️ الأمان والتوقيع الرقمي (Code Signing)
-
-كافة الحزم والملفات التنفيذية لمشاريع شركة **ARN Technology** موقعة رقمياً بشهادة معتمدة وطابع زمني **RFC-3161** لضمان الأصالة والأمان التام، وتخطي حماية **Windows 11 Smart App Control** و SmartScreen بدون أي تحذيرات أمنية.
+* **المطور:** عبده رجب نصار (Abdou Ragab Nassar)
+* **الشركة:** ARN Technology
+* **WhatsApp:** [+201556710314](https://wa.me/201556710314)
+* **Telegram:** [@ABDOURNASSAR95](https://t.me/ABDOURNASSAR95)
+* **Facebook:** [abdouragab.nassar](https://www.facebook.com/abdouragab.nassar)
+* **Messenger:** [abdouragab.nassar](https://m.me/abdouragab.nassar)
 
 ---
 
-## 📞 التواصل والدعم الفني (Contact & Social Links)
-
-للتواصل مع المطور ومؤسس شركة **ARN Technology**:
-
-- 👤 **المطور:** عبده رجب نصار (Abdou Ragab Nassar)
-- 🟢 **WhatsApp:** [+201556710314](https://wa.me/201556710314)
-- ✈️ **Telegram:** [@ABDOURNASSAR95](https://t.me/ABDOURNASSAR95)
-- 🌐 **Facebook:** [abdouragab.nassar](https://www.facebook.com/abdouragab.nassar)
-- 💬 **Messenger:** [abdouragab.nassar](https://m.me/abdouragab.nassar)
-
----
-
-## 📜 الترخيص وحقوق الملكية (License)
-
-حقوق النشر (c) 2026 لشركة **ARN Technology**. جميع الحقوق محفوظة للمطور عبده رجب نصار.
-يُمنع استخدام هذا البرنامج أو إعادة توزيعه أو تعديله تجارياً دون إذن كتابي مسبق.
+<div align="center">
+حقوق النشر (c) 2026 لشركة ARN Technology. جميع الحقوق محفوظة.
+</div>
