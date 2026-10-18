@@ -27,7 +27,11 @@ import {
   SlidersHorizontal,
   ListVideo,
   Trash2,
-  Shuffle
+  Shuffle,
+  Sun,
+  Contrast,
+  Droplets,
+  Sparkles
 } from 'lucide-react';
 import client, { savePlayback, saveVolumeSettings, fetchVolumeSettings } from '../../api/client';
 import { usePlayerStore } from '../../store/usePlayerStore';
@@ -145,9 +149,11 @@ export default function Player() {
   const [visualSettings, setVisualSettings] = useState(() => {
     try {
       const saved = localStorage.getItem('player_visual_settings');
-      return saved ? JSON.parse(saved) : { brightness: 100, contrast: 100, saturation: 100 };
+      return saved
+        ? { brightness: 100, contrast: 100, saturation: 100, sharpness: 0, ...JSON.parse(saved) }
+        : { brightness: 100, contrast: 100, saturation: 100, sharpness: 0 };
     } catch {
-      return { brightness: 100, contrast: 100, saturation: 100 };
+      return { brightness: 100, contrast: 100, saturation: 100, sharpness: 0 };
     }
   });
   const [showVisualMenu, setShowVisualMenu] = useState(false);
@@ -161,7 +167,7 @@ export default function Player() {
   }, []);
 
   const resetVisualSettings = useCallback(() => {
-    const defaultSettings = { brightness: 100, contrast: 100, saturation: 100 };
+    const defaultSettings = { brightness: 100, contrast: 100, saturation: 100, sharpness: 0 };
     setVisualSettings(defaultSettings);
     try { localStorage.setItem('player_visual_settings', JSON.stringify(defaultSettings)); } catch {}
     setShowVisualMenu(false);
@@ -263,6 +269,18 @@ export default function Player() {
     if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
     feedbackTimerRef.current = setTimeout(() => setFeedback(null), 850);
   }, []);
+
+  const applyVisualPreset = useCallback((preset) => {
+    const next = {
+      brightness: preset.brightness,
+      contrast: preset.contrast,
+      saturation: preset.saturation,
+      sharpness: preset.sharpness,
+    };
+    setVisualSettings(next);
+    try { localStorage.setItem('player_visual_settings', JSON.stringify(next)); } catch {}
+    showFeedbackBadge(isRtl ? preset.labelAr : preset.labelEn, Sparkles);
+  }, [isRtl, showFeedbackBadge]);
 
   const returnToLibraryHome = useCallback(async () => {
     if (isNavigatingHomeRef.current) return;
@@ -1160,16 +1178,21 @@ export default function Player() {
     resetHideTimer();
   };
 
-  const toggleFullscreen = (e) => {
+  const toggleFullscreen = useCallback((e) => {
     if (e && e.stopPropagation) e.stopPropagation();
+    if (e && e.preventDefault) e.preventDefault();
     if (!containerRef.current) return;
     if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen?.().catch(() => {});
+      containerRef.current.requestFullscreen?.().then(() => {
+        showFeedbackBadge(isRtl ? 'ملء الشاشة' : 'Fullscreen', Maximize);
+      }).catch(() => {});
     } else {
-      document.exitFullscreen?.().catch(() => {});
+      document.exitFullscreen?.().then(() => {
+        showFeedbackBadge(isRtl ? 'إلغاء ملء الشاشة' : 'Exit Fullscreen', Minimize);
+      }).catch(() => {});
     }
     resetHideTimer();
-  };
+  }, [isRtl, showFeedbackBadge, resetHideTimer]);
 
   const togglePiP = async (e) => {
     if (e && e.stopPropagation) e.stopPropagation();
@@ -1294,6 +1317,36 @@ export default function Player() {
     }
   };
 
+  // Middle mouse click (clicking the mouse wheel) toggles fullscreen mode
+  const handleContainerMouseDown = (e) => {
+    if (e.button === 1) {
+      if (e.target.closest('button, input, select, a, [role="button"]')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      toggleFullscreen(e);
+    }
+  };
+
+  const handleContainerAuxClick = (e) => {
+    if (e.button === 1) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  };
+
+  const sharpnessVal = Number(visualSettings.sharpness || 0);
+  // Calculate 3x3 unsharp mask convolution kernel for crisp video sharpness enhancement
+  const sharpnessK = Number(((sharpnessVal / 100) * 0.9).toFixed(2));
+  const sharpenCenter = Number((1 + 4 * sharpnessK).toFixed(2));
+  const sharpenNegK = -sharpnessK;
+  const sharpenKernelMatrix = `0 ${sharpenNegK} 0 ${sharpenNegK} ${sharpenCenter} ${sharpenNegK} 0 ${sharpenNegK} 0`;
+  const isVisualModified = (
+    visualSettings.brightness !== 100 ||
+    visualSettings.contrast !== 100 ||
+    visualSettings.saturation !== 100 ||
+    sharpnessVal !== 0
+  );
+
   return (
     <div
       ref={containerRef}
@@ -1302,8 +1355,29 @@ export default function Player() {
       }`}
       onMouseMove={resetHideTimer}
       onClick={handleContainerClick}
+      onMouseDown={handleContainerMouseDown}
+      onAuxClick={handleContainerAuxClick}
       onWheel={handleWheel}
     >
+      {/* SVG Convolution Filter for Video Sharpness (Edge-Preserving Detail Enhancement) */}
+      <svg
+        className="absolute w-0 h-0 pointer-events-none opacity-0 select-none"
+        aria-hidden="true"
+        style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden' }}
+      >
+        <defs>
+          <filter id="arn-video-sharpen" x="0%" y="0%" width="100%" height="100%" colorInterpolationFilters="sRGB">
+            <feConvolveMatrix
+              order="3"
+              preserveAlpha="true"
+              edgeMode="duplicate"
+              divisor="1"
+              kernelMatrix={sharpenKernelMatrix}
+            />
+          </filter>
+        </defs>
+      </svg>
+
       {/* Video Element */}
       <video
         key={id}
@@ -1326,7 +1400,7 @@ export default function Player() {
               : 'object-contain'
         }`}
         style={{
-          filter: `brightness(${visualSettings.brightness}%) contrast(${visualSettings.contrast}%) saturate(${visualSettings.saturation}%)`
+          filter: `${sharpnessVal > 0 ? 'url(#arn-video-sharpen) ' : ''}brightness(${visualSettings.brightness}%) contrast(${visualSettings.contrast}%) saturate(${visualSettings.saturation}%)`
         }}
       >
         {selectedSubtitle?.path ? (
@@ -1732,49 +1806,117 @@ export default function Player() {
                       setShowSpeedMenu(false);
                       setShowAspectMenu(false);
                     }}
-                    className={`px-2 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold backdrop-blur transition-all flex items-center gap-1 sm:gap-1.5 touch-manipulation ${
+                    className={`relative px-2 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold backdrop-blur transition-all flex items-center gap-1 sm:gap-1.5 touch-manipulation ${
                       showVisualMenu ? 'bg-primaryMovies text-white' : 'bg-white/10 hover:bg-white/20 text-white'
                     }`}
-                    title={isRtl ? 'إعدادات مرئية' : 'Visual Settings'}
+                    title={isRtl ? 'إعدادات الصورة والحدة' : 'Visual & Sharpness Settings'}
                   >
                     <SlidersHorizontal size={13} className="sm:w-3.5 sm:h-3.5" />
-                    <span className={isRtl ? 'hidden' : 'hidden sm:inline'}>Colors</span>
+                    <span className={isRtl ? 'hidden sm:inline' : 'hidden sm:inline'}>
+                      {isRtl ? 'الصورة' : 'Visuals'}
+                    </span>
+                    {isVisualModified && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-primaryMovies shadow-[0_0_8px_rgba(239,68,68,0.8)] ring-1 ring-white/50" />
+                    )}
                   </button>
 
                   {/* Visual Settings Menu Popup */}
                   {showVisualMenu && (
                     <div
                       onClick={(e) => e.stopPropagation()}
-                      className={`absolute bottom-12 ${isRtl ? 'left-0 sm:left-0' : 'right-0 sm:right-0'} bg-slate-900/95 backdrop-blur-xl border border-white/20 rounded-xl p-3 shadow-2xl z-50 w-[240px] max-w-[calc(100vw-24px)] animate-fadeIn flex flex-col gap-3`}
+                      className={`absolute bottom-12 ${isRtl ? 'left-0 sm:left-0' : 'right-0 sm:right-0'} bg-slate-900/95 backdrop-blur-xl border border-white/20 rounded-xl p-3 shadow-2xl z-50 w-[270px] max-w-[calc(100vw-24px)] animate-fadeIn flex flex-col gap-3`}
                     >
                       <div className="flex justify-between items-center border-b border-white/20 pb-2">
-                        <div className="text-[11px] font-semibold text-white/70">
-                          {isRtl ? 'إعدادات الصورة' : 'Visual Settings'}
+                        <div className="text-[11px] font-semibold text-white/80 flex items-center gap-1.5">
+                          <SlidersHorizontal size={12} className="text-primaryMovies" />
+                          <span>{isRtl ? 'إعدادات الصورة والحدة' : 'Visual & Sharpness'}</span>
                         </div>
-                        <button onClick={resetVisualSettings} className="text-[10px] text-white/50 hover:text-white transition">
-                          {isRtl ? 'إعادة ضبط' : 'Reset'}
-                        </button>
+                        {isVisualModified && (
+                          <button
+                            onClick={resetVisualSettings}
+                            className="text-[10px] text-white/50 hover:text-rose-400 transition flex items-center gap-1"
+                            title={isRtl ? 'إعادة ضبط كافة الإعدادات' : 'Reset all settings'}
+                          >
+                            <RotateCcw size={10} />
+                            <span>{isRtl ? 'إعادة ضبط' : 'Reset'}</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Quick Presets */}
+                      <div className="grid grid-cols-4 gap-1 pb-1">
+                        {[
+                          { id: 'default', labelAr: 'افتراضي', labelEn: 'Default', brightness: 100, contrast: 100, saturation: 100, sharpness: 0 },
+                          { id: 'vivid', labelAr: 'حيوي', labelEn: 'Vivid', brightness: 105, contrast: 110, saturation: 120, sharpness: 25 },
+                          { id: 'cinema', labelAr: 'سينما', labelEn: 'Cinema', brightness: 95, contrast: 115, saturation: 105, sharpness: 15 },
+                          { id: 'crisp', labelAr: 'فائق الحدة', labelEn: 'Crisp', brightness: 100, contrast: 105, saturation: 100, sharpness: 50 },
+                        ].map(preset => {
+                          const isPresetActive = (
+                            visualSettings.brightness === preset.brightness &&
+                            visualSettings.contrast === preset.contrast &&
+                            visualSettings.saturation === preset.saturation &&
+                            (visualSettings.sharpness || 0) === preset.sharpness
+                          );
+                          return (
+                            <button
+                              key={preset.id}
+                              onClick={() => applyVisualPreset(preset)}
+                              className={`py-1 px-1 rounded-md text-[9px] sm:text-[10px] font-medium transition text-center truncate ${
+                                isPresetActive
+                                  ? 'bg-primaryMovies text-white font-bold shadow-sm'
+                                  : 'bg-white/5 hover:bg-white/15 text-white/70 hover:text-white'
+                              }`}
+                            >
+                              {isRtl ? preset.labelAr : preset.labelEn}
+                            </button>
+                          );
+                        })}
                       </div>
                       
                       {[
-                        { id: 'brightness', label: isRtl ? 'الإضاءة' : 'Brightness' },
-                        { id: 'contrast', label: isRtl ? 'التباين' : 'Contrast' },
-                        { id: 'saturation', label: isRtl ? 'التشبع' : 'Saturation' }
-                      ].map(ctrl => (
-                        <div key={ctrl.id} className="flex flex-col gap-1">
-                          <div className="flex justify-between text-[10px] text-white/80">
-                            <span>{ctrl.label}</span>
-                            <span className="font-mono">{visualSettings[ctrl.id]}%</span>
+                        { id: 'brightness', label: isRtl ? 'الإضاءة' : 'Brightness', icon: Sun, min: 50, max: 200, step: 5, defaultVal: 100 },
+                        { id: 'contrast', label: isRtl ? 'التباين' : 'Contrast', icon: Contrast, min: 50, max: 200, step: 5, defaultVal: 100 },
+                        { id: 'saturation', label: isRtl ? 'التشبع' : 'Saturation', icon: Droplets, min: 50, max: 200, step: 5, defaultVal: 100 },
+                        { id: 'sharpness', label: isRtl ? 'الحدة' : 'Sharpness', icon: Sparkles, min: 0, max: 100, step: 5, defaultVal: 0 }
+                      ].map(ctrl => {
+                        const Icon = ctrl.icon;
+                        const currentVal = visualSettings[ctrl.id] ?? ctrl.defaultVal;
+                        const isCtrlModified = currentVal !== ctrl.defaultVal;
+
+                        return (
+                          <div key={ctrl.id} className="flex flex-col gap-1">
+                            <div className="flex justify-between items-center text-[10px] text-white/80">
+                              <span className="flex items-center gap-1.5">
+                                <Icon size={11} className={isCtrlModified ? 'text-primaryMovies' : 'text-white/60'} />
+                                <span>{ctrl.label}</span>
+                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <span className={`font-mono text-[10px] ${isCtrlModified ? 'text-primaryMovies font-bold' : 'text-white/70'}`}>
+                                  {currentVal}%
+                                </span>
+                                {isCtrlModified && (
+                                  <button
+                                    onClick={() => updateVisualSetting(ctrl.id, ctrl.defaultVal)}
+                                    className="text-white/40 hover:text-white transition"
+                                    title={isRtl ? 'إرجاع للقيمة الأصلية' : 'Reset to default'}
+                                  >
+                                    <RotateCcw size={9} />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                            <input
+                              type="range"
+                              min={ctrl.min}
+                              max={ctrl.max}
+                              step={ctrl.step}
+                              value={currentVal}
+                              onChange={(e) => updateVisualSetting(ctrl.id, Number(e.target.value))}
+                              className="w-full h-1.5 bg-white/20 rounded-lg appearance-none cursor-pointer accent-primaryMovies"
+                            />
                           </div>
-                          <input
-                            type="range"
-                            min="50" max="200" step="5"
-                            value={visualSettings[ctrl.id]}
-                            onChange={(e) => updateVisualSetting(ctrl.id, Number(e.target.value))}
-                            className="w-full h-1.5 bg-white/20 rounded-lg appearance-none cursor-pointer accent-primaryMovies"
-                          />
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>

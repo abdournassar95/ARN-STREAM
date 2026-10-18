@@ -20,7 +20,8 @@ import {
   ArrowRight,
   ArrowLeft,
   QrCode,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Cast
 } from 'lucide-react';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -41,7 +42,7 @@ export default function TopBar({ variant = 'movies' }) {
   const isRtl = i18n.language === 'ar';
   
   const [showQrModal, setShowQrModal] = useState(false);
-  const { activeRemoteSession, openFullRemote } = useDeviceHandoffStore();
+  const { activeRemoteSession, openFullRemote, openCastModal, onlineDevices } = useDeviceHandoffStore();
   
   const [q, setQ] = useState('');
   const [searchSuggestions, setSearchSuggestions] = useState([]);
@@ -538,7 +539,61 @@ export default function TopBar({ variant = 'movies' }) {
             </span>
           </Link>
 
-          {/* 3. All Dynamic Libraries */}
+          {/* 3. بث وتحكم الأجهزة (Cast & Remote Control) */}
+          <button
+            type="button"
+            onClick={() => {
+              if (activeRemoteSession) {
+                openFullRemote();
+              } else {
+                openCastModal(null);
+              }
+            }}
+            className={`flex items-center h-11 px-1 rounded-2xl transition-all duration-200 relative group/nav w-full ${
+              activeRemoteSession
+                ? 'bg-gradient-to-r from-rose-600/30 to-red-600/30 text-rose-300 font-bold border border-rose-500/40 shadow-lg shadow-rose-900/20 animate-pulse'
+                : (isDark 
+                    ? 'text-white/75 hover:text-white hover:bg-white/10' 
+                    : 'text-slate-600 hover:text-slate-950 hover:bg-black/5')
+            }`}
+            title={activeRemoteSession 
+              ? (isRtl ? `التحكم في ${activeRemoteSession.targetDeviceName}` : `Control ${activeRemoteSession.targetDeviceName}`)
+              : (isRtl ? 'البث والتحكم الكامل في الأجهزة' : 'Cast & Remote Control')}
+          >
+            <div className="w-11 h-11 flex items-center justify-center flex-shrink-0 relative mx-auto group-hover/sidebar:mx-0">
+              <Cast size={19} className={activeRemoteSession ? 'text-rose-400' : 'text-emerald-400'} />
+              {activeRemoteSession ? (
+                <span className="absolute top-2.5 end-2.5 flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
+                </span>
+              ) : (
+                onlineDevices?.length > 1 && (
+                  <span className="absolute top-2.5 end-2.5 flex h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-sm" />
+                )
+              )}
+            </div>
+            <span className="opacity-0 w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:w-auto transition-all duration-200 font-semibold text-xs sm:text-sm truncate ms-1.5 whitespace-nowrap overflow-hidden flex items-center gap-1.5">
+              <span>
+                {activeRemoteSession
+                  ? (isRtl ? `التحكم: ${activeRemoteSession.targetDeviceName}` : `Remote: ${activeRemoteSession.targetDeviceName}`)
+                  : (isRtl ? 'بث وتحكم الأجهزة' : 'Cast & Remote')}
+              </span>
+              {activeRemoteSession ? (
+                <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-rose-600 text-white shadow-sm">
+                  ACTIVE
+                </span>
+              ) : (
+                onlineDevices?.length > 1 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                    {onlineDevices.length - 1}
+                  </span>
+                )
+              )}
+            </span>
+          </button>
+
+          {/* 4. All Dynamic Libraries */}
           {sortedLibraries.map(lib => {
             const isLibActive = location.pathname === `/library/${lib.id}`;
             return (
@@ -733,17 +788,30 @@ export default function TopBar({ variant = 'movies' }) {
 
               {/* Mobile Right Tools */}
               <div className="flex items-center gap-1.5">
-                {activeRemoteSession && (
-                  <button
-                    type="button"
-                    onClick={openFullRemote}
-                    className="px-2.5 py-1 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 text-white text-[11px] font-bold flex items-center gap-1 shadow-md animate-pulse border border-rose-400/30"
-                    title={isRtl ? `التحكم في ${activeRemoteSession.targetDeviceName}` : `Control ${activeRemoteSession.targetDeviceName}`}
-                  >
-                    <SlidersHorizontal size={12} />
-                    <span className="truncate max-w-[70px]">{activeRemoteSession.targetDeviceName}</span>
-                  </button>
-                )}
+                {/* Cast / Remote Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (activeRemoteSession) {
+                      openFullRemote();
+                    } else {
+                      openCastModal(null);
+                    }
+                  }}
+                  className={`px-2 py-1 rounded-xl text-[11px] font-bold flex items-center gap-1 shadow-sm transition active:scale-95 ${
+                    activeRemoteSession
+                      ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white animate-pulse border border-rose-400/30'
+                      : (isDark ? 'bg-white/10 hover:bg-white/20 text-white/90' : 'bg-black/5 hover:bg-black/10 text-slate-700')
+                  }`}
+                  title={activeRemoteSession
+                    ? (isRtl ? `التحكم في ${activeRemoteSession.targetDeviceName}` : `Control ${activeRemoteSession.targetDeviceName}`)
+                    : (isRtl ? 'البث والتحكم بالأجهزة' : 'Cast & Remote')}
+                >
+                  <Cast size={13} className={activeRemoteSession ? 'text-white' : 'text-emerald-400'} />
+                  <span className="truncate max-w-[65px]">
+                    {activeRemoteSession ? activeRemoteSession.targetDeviceName : (isRtl ? 'بث' : 'Cast')}
+                  </span>
+                </button>
 
                 <button
                   type="button"
@@ -892,6 +960,44 @@ export default function TopBar({ variant = 'movies' }) {
                     LIVE
                   </span>
                 </Link>
+
+                {/* بث وتحكم الأجهزة */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    if (activeRemoteSession) {
+                      openFullRemote();
+                    } else {
+                      openCastModal(null);
+                    }
+                  }}
+                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition ${
+                    activeRemoteSession
+                      ? 'bg-gradient-to-r from-red-600/30 to-rose-600/30 text-rose-300 font-bold border border-rose-500/40 shadow-md'
+                      : (isDark ? 'text-white/80 hover:bg-white/10' : 'text-slate-600 hover:bg-black/5')
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Cast size={18} className={activeRemoteSession ? 'text-rose-400' : 'text-emerald-400'} />
+                    <span>
+                      {activeRemoteSession
+                        ? (isRtl ? `التحكم: ${activeRemoteSession.targetDeviceName}` : `Remote: ${activeRemoteSession.targetDeviceName}`)
+                        : (isRtl ? 'بث وتحكم الأجهزة' : 'Cast & Remote')}
+                    </span>
+                  </div>
+                  {activeRemoteSession ? (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-rose-600 text-white shadow-sm">
+                      ACTIVE
+                    </span>
+                  ) : (
+                    onlineDevices?.length > 1 && (
+                      <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                        {onlineDevices.length - 1}
+                      </span>
+                    )
+                  )}
+                </button>
               </div>
 
               {/* Libraries List */}

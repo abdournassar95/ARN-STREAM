@@ -13,6 +13,7 @@ import db, {
 import { scanLibrary } from '../scanner/media-scanner.js';
 import { requireAdmin, requireAuth } from '../services/auth.js';
 import { processAndCacheImage } from '../services/image-cache.js';
+import { invalidateCache } from '../middleware/response-cache.js';
 
 const upload = multer({ dest: path.join(getDataDir(), 'tmp_uploads') });
 const router = express.Router();
@@ -262,6 +263,9 @@ router.post('/', requireAdmin, (req, res) => {
     : [];
 
   const created = createLibrary(name, type, cleanPaths, icon);
+  invalidateCache('/api/library/landing');
+  invalidateCache('/api/libraries');
+  invalidateCache('/api/library');
   res.json({ data: created, message: 'Library created successfully' });
 });
 
@@ -271,6 +275,9 @@ router.put('/:id', requireAdmin, (req, res) => {
   if (!updated) {
     return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Library not found' } });
   }
+  invalidateCache('/api/library/landing');
+  invalidateCache('/api/libraries');
+  invalidateCache('/api/library');
   res.json({ data: updated, message: 'Library updated successfully' });
 });
 
@@ -278,6 +285,9 @@ router.put('/:id', requireAdmin, (req, res) => {
 router.delete('/:id', requireAdmin, (req, res) => {
   const id = Number(req.params.id);
   deleteLibrary(id);
+  invalidateCache('/api/library/landing');
+  invalidateCache('/api/libraries');
+  invalidateCache('/api/library');
   res.json({ data: { success: true } });
 });
 
@@ -312,6 +322,9 @@ router.post('/:id/upload-cover', requireAdmin, upload.single('image'), async (re
     }
 
     const coverUrl = `/api/image/${result.id}/thumb`;
+    invalidateCache('/api/library/landing');
+    invalidateCache('/api/libraries');
+    invalidateCache('/api/library');
     res.json({
       success: true,
       data: {
@@ -349,12 +362,21 @@ router.get('/:id/available-covers', (req, res) => {
 
   let covers = [];
   if (lib.type === 'movies') {
+    const isPlays = (lib.name || '').includes('مسرح');
+    const isDoc = (lib.name || '').includes('وثائق');
+    const itemType = isPlays ? 'play' : (isDoc ? 'documentary' : 'movie');
+
+    // Distinct 1 primary poster per movie to prevent duplicates
     const rows = db.prepare(`
       SELECT images.id, movies.title
-      FROM images
-      JOIN movies ON movies.id = images.media_id AND images.media_type = 'movie'
+      FROM movies
+      JOIN images ON images.id = (
+        SELECT id FROM images 
+        WHERE media_id = movies.id AND media_type = 'movie' AND image_type = 'poster'
+        ORDER BY is_primary DESC, id DESC
+        LIMIT 1
+      )
       WHERE (movies.library_id = ? OR movies.library_id IS NULL)
-        AND images.image_type = 'poster'
       ORDER BY movies.added_at DESC
       LIMIT 500
     `).all(lib.id);
@@ -364,16 +386,24 @@ router.get('/:id/available-covers', (req, res) => {
         id: r.id,
         title: r.title,
         url: `/api/image/${r.id}/thumb`,
-        type: 'movie'
+        type: itemType
       }))
     ];
   } else if (lib.type === 'shows') {
+    const isDoc = (lib.name || '').includes('وثائق');
+    const itemType = isDoc ? 'documentary' : 'show';
+
+    // Distinct 1 primary poster per series to prevent duplicates
     const rows = db.prepare(`
       SELECT images.id, series.title
-      FROM images
-      JOIN series ON series.id = images.media_id AND images.media_type = 'series'
+      FROM series
+      JOIN images ON images.id = (
+        SELECT id FROM images 
+        WHERE media_id = series.id AND media_type = 'series' AND image_type = 'poster'
+        ORDER BY is_primary DESC, id DESC
+        LIMIT 1
+      )
       WHERE (series.library_id = ? OR series.library_id IS NULL)
-        AND images.image_type = 'poster'
       ORDER BY series.added_at DESC
       LIMIT 500
     `).all(lib.id);
@@ -383,7 +413,7 @@ router.get('/:id/available-covers', (req, res) => {
         id: r.id,
         title: r.title,
         url: `/api/image/${r.id}/thumb`,
-        type: 'show'
+        type: itemType
       }))
     ];
   } else if (lib.type === 'music') {
@@ -435,13 +465,17 @@ router.get('/:id/available-covers', (req, res) => {
       }
     }
 
-    // 2. Albums: Fetch all album covers for this library
+    // 2. Albums: Fetch all album covers for this library (1 per album)
     const albumRows = db.prepare(`
       SELECT images.id, albums.title, albums.artist_id
-      FROM images
-      JOIN albums ON albums.id = images.media_id AND images.media_type = 'album'
+      FROM albums
+      JOIN images ON images.id = (
+        SELECT id FROM images 
+        WHERE media_id = albums.id AND media_type = 'album' AND image_type = 'album_cover'
+        ORDER BY is_primary DESC, id DESC
+        LIMIT 1
+      )
       WHERE (albums.library_id = ? OR albums.library_id IS NULL)
-        AND images.image_type = 'album_cover'
       ORDER BY albums.added_at DESC
       LIMIT 500
     `).all(lib.id).map(r => ({
@@ -490,6 +524,10 @@ router.put('/:id/custom-covers', requireAdmin, (req, res) => {
 
   db.prepare('UPDATE libraries SET custom_covers = ? WHERE id = ?').run(val, lib.id);
   const updatedLib = getLibraryById(lib.id);
+
+  invalidateCache('/api/library/landing');
+  invalidateCache('/api/libraries');
+  invalidateCache('/api/library');
 
   res.json({
     data: updatedLib,

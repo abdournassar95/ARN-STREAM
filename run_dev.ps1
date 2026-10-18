@@ -1,4 +1,4 @@
-﻿[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 # Ensure Administrator privileges so previous elevated processes on 8096 can be killed
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -41,9 +41,16 @@ $workspace = $PSScriptRoot
 $serverDir = Join-Path $workspace "server"
 $clientDir = Join-Path $workspace "client"
 
+# Find available node executable (fallback to installed ARN Stream node.exe if npm/node not in PATH)
+$nodeExe = "node"
+$arnNode = "C:\Program Files\ARN Stream\bin\node.exe"
+if (Test-Path $arnNode) {
+    $nodeExe = $arnNode
+}
+
 # 3. تشغيل سيرفر الباك إند في نافذة منفصلة
 Write-Host "`n[3/3] جاري تشغيل سيرفر الباك إند (Port: 8096)..." -ForegroundColor Cyan
-$serverCmd = "Set-Location -LiteralPath '$serverDir'; npm run dev"
+$serverCmd = "Set-Location -LiteralPath '$serverDir'; & '$nodeExe' --watch-path=index.js --watch-path=db.js --watch-path=routes --watch-path=scanner --watch-path=services index.js"
 Start-Process powershell.exe -ArgumentList @("-NoExit", "-ExecutionPolicy", "Bypass", "-Command", $serverCmd)
 
 # 4. تشغيل واجهة التطوير (Vite) في هذه النافذة
@@ -54,8 +61,13 @@ Write-Host "  الرابط: http://localhost:5173" -ForegroundColor Yellow
 Write-Host "----------------------------------------------------------`n" -ForegroundColor DarkGray
 
 Set-Location -LiteralPath $clientDir
+$vitePath = Join-Path $clientDir "node_modules\vite\bin\vite.js"
 try {
-    npm run dev
+    if (Test-Path $vitePath) {
+        & "$nodeExe" "$vitePath" --port 5173 --host 0.0.0.0
+    } else {
+        npm run dev
+    }
 } finally {
     Write-Host "`nتم إيقاف خادم الواجهة." -ForegroundColor Yellow
     Read-Host "اضغط Enter للإغلاق"

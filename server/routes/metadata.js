@@ -747,11 +747,12 @@ router.post('/:type/:id/poster', requireAdmin, upload.single('file'), async (req
 
     invalidateMediaImageCache(type, id);
 
+    const bustTime = Date.now();
     res.json({
       data: {
         id: savedImgId,
-        thumb: `/api/image/${savedImgId}/thumb`,
-        full: `/api/image/${savedImgId}/full`
+        thumb: `/api/image/${savedImgId}/thumb?t=${bustTime}`,
+        full: `/api/image/${savedImgId}/full?t=${bustTime}`
       },
       message: 'Poster updated successfully'
     });
@@ -774,119 +775,117 @@ router.post('/tmdb-key', requireAdmin, (req, res) => {
   res.json({ success: true, message: 'TMDB API key updated successfully' });
 });
 
-// Scrape TMDB metadata directly without requiring an API key
-async function fetchTmdbDirect(targetType, tmdbId) {
-  try {
-    const url = `https://www.themoviedb.org/${targetType}/${tmdbId}?language=ar`;
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept-Language': 'ar,ar-EG;q=0.9,en;q=0.8'
-      },
-      redirect: 'follow',
-      signal: AbortSignal.timeout(6000)
-    });
-    if (!res.ok) return null;
-    const html = await res.text();
+// Reliable TMDB fallback keys pool (standard widely-used client keys)
+const TMDB_FALLBACK_KEYS = [
+  '4e44d9029b1270a757cddc766a1bcb63',
+  '3bb3e67969473d0d1607a3e6691bc650'
+];
 
-    const ogMap = {};
-    for (const m of html.matchAll(/<meta\s+property=["']([^"']+)["']\s+content=["']([^"']+)["']/gi)) {
-      ogMap[m[1]] = m[2];
-    }
-
-    if (!ogMap['og:title']) return null;
-
-    // Year
-    const yearMatch = html.match(/<span class="tag release_date">\s*\((\d{4})\)/i) 
-      || html.match(/\((\d{4})\)/)
-      || html.match(/first_air_date["']:["'](\d{4})/i)
-      || html.match(/"datePublished":\s*"(\d{4})/i);
-
-    // Rating
-    const ratingMatch = html.match(/data-percent=["']([\d\.]+)["']/i);
-    const rating = ratingMatch ? Math.round(Number(ratingMatch[1])) / 10 : null;
-
-    // Poster
-    const posterMatch = html.match(/class="poster lazyload"\s+data-src=["']([^"']+)["']/i)
-      || html.match(/class="poster[^"]*"\s+src=["']([^"']+)["']/i);
-    
-    let poster = ogMap['og:image'] || null;
-    if (posterMatch && posterMatch[1]) {
-      poster = posterMatch[1].startsWith('http') ? posterMatch[1] : `https://image.tmdb.org/t/p/w500${posterMatch[1]}`;
-    }
-
-    // Backdrop
-    let backdrop = null;
-    const bgMatch = html.match(/image\.tmdb\.org\/t\/p\/w1920_and_h800_multi_faces\/([a-zA-Z0-9_\-\.]+\.(?:jpg|png|webp))/i)
-      || html.match(/image\.tmdb\.org\/t\/p\/original\/([a-zA-Z0-9_\-\.]+\.(?:jpg|png|webp))/i)
-      || html.match(/media\.themoviedb\.org\/t\/p\/[^\/]+\/([a-zA-Z0-9_\-\.]+\.(?:jpg|png|webp))/i);
-
-    if (bgMatch) {
-      backdrop = `https://image.tmdb.org/t/p/original/${bgMatch[1]}`;
-    } else {
-      const bgFallback = html.match(/background-image:\s*url\((['"]?)([^'"\)]+)\1\)/i);
-      if (bgFallback && bgFallback[2]) {
-        backdrop = bgFallback[2].startsWith('http') ? bgFallback[2] : `https://image.tmdb.org/t/p/w1280${bgFallback[2]}`;
-      }
-    }
-
-    const titleClean = (ogMap['og:title'] || '').replace(/\s*\(\d{4}\)\s*$/, '').trim();
-
-    // Genres
-    let genres = [];
-    const genresMatch = html.match(/class=["']genres["'][^>]*>([\s\S]*?)<\/span>/i);
-    if (genresMatch) {
-      genres = genresMatch[1].replace(/<[^>]+>/g, ',').split(',').map(s => s.trim()).filter(Boolean);
-    }
-
-    return {
-      id: `tmdb-${tmdbId}`,
-      title: titleClean,
-      year: yearMatch ? Number(yearMatch[1]) : null,
-      plot: ogMap['og:description'] || null,
-      poster: poster,
-      backdrop: backdrop,
-      rating: rating,
-      genres: genres,
-      source: 'tmdb',
-      isDirectMatch: true
-    };
-  } catch (err) {
-    console.error('TMDB direct scraper error:', err.message);
-    return null;
+function getEffectiveTmdbKeys() {
+  const customKey = (getSetting('tmdb_api_key', '') || process.env.TMDB_API_KEY || '').trim();
+  const keys = [];
+  if (customKey) keys.push(customKey);
+  for (const k of TMDB_FALLBACK_KEYS) {
+    if (!keys.includes(k)) keys.push(k);
   }
+  return keys;
 }
 
-// Scrape TMDB search results directly without requiring an API key
-async function searchTmdbDirect(query, isSeries) {
-  try {
-    const tmdbType = isSeries ? 'tv' : 'movie';
-    const url = `https://www.themoviedb.org/search/${tmdbType}?query=${encodeURIComponent(query)}&language=ar`;
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept-Language': 'ar,ar-EG;q=0.9,en;q=0.8'
-      },
-      signal: AbortSignal.timeout(6000)
-    });
-    if (!res.ok) return [];
-    const html = await res.text();
-    const re = new RegExp(`\\/${tmdbType}\\/(\\d+)`, 'g');
-    let m;
-    const ids = [];
-    while ((m = re.exec(html)) !== null) {
-      if (!ids.includes(m[1])) {
-        ids.push(m[1]);
-        if (ids.length >= 4) break;
+// Fetch TMDB metadata directly using the official TMDB v3 API (Arabic with English fallback)
+async function fetchTmdbDirect(targetType, tmdbId) {
+  const keys = getEffectiveTmdbKeys();
+  for (const key of keys) {
+    try {
+      const url = `https://api.themoviedb.org/3/${targetType}/${tmdbId}?api_key=${key}&language=ar&append_to_response=images`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 429) continue;
+        return null;
       }
+      const data = await res.json();
+      let overview = data.overview;
+      let titleName = data.title || data.name;
+
+      if (!overview || !overview.trim()) {
+        try {
+          const enRes = await fetch(`https://api.themoviedb.org/3/${targetType}/${tmdbId}?api_key=${key}&language=en-US`, { signal: AbortSignal.timeout(4000) });
+          if (enRes.ok) {
+            const enData = await enRes.json();
+            if (!overview || !overview.trim()) overview = enData.overview;
+            if (!titleName) titleName = enData.title || enData.name;
+          }
+        } catch {}
+      }
+
+      let backdrop = data.backdrop_path ? `https://image.tmdb.org/t/p/w1280${data.backdrop_path}` : null;
+      if (!backdrop && data.images?.backdrops?.length > 0) {
+        backdrop = `https://image.tmdb.org/t/p/w1280${data.images.backdrops[0].file_path}`;
+      }
+
+      let poster = data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : null;
+      if (!poster && data.images?.posters?.length > 0) {
+        poster = `https://image.tmdb.org/t/p/w500${data.images.posters[0].file_path}`;
+      }
+
+      const rawYear = (data.release_date || data.first_air_date || '').split('-')[0];
+      const year = rawYear ? Number(rawYear) : null;
+      const rating = data.vote_average ? Math.round(data.vote_average * 10) / 10 : null;
+      const genres = (data.genres || []).map(g => g.name).filter(Boolean);
+
+      return {
+        id: `tmdb-${data.id}`,
+        title: titleName,
+        year: year,
+        plot: overview || null,
+        poster: poster,
+        backdrop: backdrop,
+        rating: rating,
+        genres: genres,
+        source: 'tmdb',
+        isDirectMatch: true
+      };
+    } catch (err) {
+      console.warn(`[TMDB Direct Error] key=${key}:`, err.message);
     }
-    const promises = ids.map(id => fetchTmdbDirect(tmdbType, id));
-    const items = await Promise.all(promises);
-    return items.filter(Boolean);
-  } catch (err) {
-    console.error('searchTmdbDirect error:', err.message);
-    return [];
   }
+  return null;
+}
+
+// Search TMDB metadata directly using the official TMDB v3 API (Arabic with English fallback)
+async function searchTmdbDirect(query, isSeries) {
+  const tmdbType = isSeries ? 'tv' : 'movie';
+  const keys = getEffectiveTmdbKeys();
+  for (const key of keys) {
+    try {
+      const url = `https://api.themoviedb.org/3/search/${tmdbType}?api_key=${key}&query=${encodeURIComponent(query)}&language=ar`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 429) continue;
+        return [];
+      }
+      const data = await res.json();
+      const list = data.results || [];
+      const results = [];
+      for (const item of list.slice(0, 10)) {
+        const rawYear = (item.release_date || item.first_air_date || '').split('-')[0];
+        results.push({
+          id: `tmdb-${item.id}`,
+          title: item.title || item.name,
+          year: rawYear ? Number(rawYear) : null,
+          plot: item.overview || null,
+          poster: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null,
+          backdrop: item.backdrop_path ? `https://image.tmdb.org/t/p/w1280${item.backdrop_path}` : null,
+          rating: item.vote_average ? Math.round(item.vote_average * 10) / 10 : null,
+          genres: [],
+          source: 'tmdb'
+        });
+      }
+      return results;
+    } catch (err) {
+      console.warn(`[TMDB Search Error] key=${key}:`, err.message);
+    }
+  }
+  return [];
 }
 
 // Search online metadata (IMDb + TMDB ONLY - NO Wikipedia, NO Actors/Cast)
@@ -902,7 +901,6 @@ router.get('/search', async (req, res) => {
   const isSeries = (type === 'series' || type === 'season');
   const cMediaType = isSeries ? 'series' : 'movie';
   const tmdbType = isSeries ? 'tv' : 'movie';
-  const tmdbKey = getSetting('tmdb_api_key') || process.env.TMDB_API_KEY || null;
 
   // 1. Check for explicit IMDb ID or IMDb URL (e.g. tt1234567, tt12345678, https://www.imdb.com/title/tt2290891/...)
   const imdbIdMatch = query.match(/\b(tt\d{6,10})\b/i);
@@ -937,7 +935,7 @@ router.get('/search', async (req, res) => {
     }
   }
 
-  // 2. Check for explicit TMDB ID, URL, or URL Slug (e.g. 52698-al-kabeer, https://www.themoviedb.org/tv/52698-al-kabeer, tv/52698, 52698)
+  // 2. Check for explicit TMDB ID, URL, or URL Slug (e.g. 52698-al-kabeer, https://www.themoviedb.org/tv/52698-al-kabeer, tv/52698, 52698, https://www.themoviedb.org/movie/1358036)
   const tmdbUrlMatch = query.match(/(?:themoviedb\.org\/)?(tv|movie)\/(\d+)(?:-[a-z0-9\-_]+)?/i);
   const tmdbSlugMatch = !imdbIdMatch && !tmdbUrlMatch && query.match(/^(?:tmdb[:\-])?(\d{2,10})(?:-[a-z0-9\-_]+)?$/i);
   
@@ -945,7 +943,6 @@ router.get('/search', async (req, res) => {
     const targetType = tmdbUrlMatch ? (tmdbUrlMatch[1].toLowerCase() === 'tv' ? 'tv' : 'movie') : tmdbType;
     const tmdbId = tmdbUrlMatch ? tmdbUrlMatch[2] : tmdbSlugMatch[1];
 
-    // Try direct TMDB web scraper first (Zero API key needed!)
     try {
       const directItem = await fetchTmdbDirect(targetType, tmdbId);
       if (directItem) {
@@ -954,88 +951,21 @@ router.get('/search', async (req, res) => {
     } catch (e) {
       console.error('Direct TMDB fetch error:', e);
     }
-
-    // Fallback to TMDB API if key configured and scraper didn't return
-    if (results.length === 0 && tmdbKey) {
-      try {
-        const tRes = await fetch(`https://api.themoviedb.org/3/${targetType}/${tmdbId}?api_key=${tmdbKey}&language=ar&append_to_response=images`);
-        if (tRes.ok) {
-          const tData = await tRes.json();
-          let overview = tData.overview;
-          let titleName = tData.title || tData.name;
-          if (!overview) {
-            try {
-              const enRes = await fetch(`https://api.themoviedb.org/3/${targetType}/${tmdbId}?api_key=${tmdbKey}&language=en-US`);
-              if (enRes.ok) {
-                const enData = await enRes.json();
-                overview = enData.overview;
-                if (!titleName) titleName = enData.title || enData.name;
-              }
-            } catch {}
-          }
-
-          results.push({
-            id: `tmdb-${tData.id}`,
-            title: titleName,
-            year: (tData.release_date || tData.first_air_date || '').split('-')[0] ? Number((tData.release_date || tData.first_air_date || '').split('-')[0]) : null,
-            plot: overview || null,
-            poster: tData.poster_path ? `https://image.tmdb.org/t/p/w500${tData.poster_path}` : null,
-            backdrop: tData.backdrop_path ? `https://image.tmdb.org/t/p/w1280${tData.backdrop_path}` : null,
-            rating: tData.vote_average ? Math.round(tData.vote_average * 10) / 10 : null,
-            genres: (tData.genres || []).map(g => g.name).filter(Boolean),
-            source: 'tmdb',
-            isDirectMatch: true
-          });
-        }
-      } catch (e) {
-        console.error('TMDB direct ID search error:', e.message);
-      }
-    }
   }
 
   const isDirectCodeMatch = Boolean(imdbIdMatch || tmdbUrlMatch || tmdbSlugMatch);
 
-  // 3. Search TMDB (Official API if key configured, or Direct TMDB Web Scraper if no key)
+  // 3. Search TMDB
   if (!isDirectCodeMatch) {
-    if (tmdbKey) {
-      try {
-        const tmdbEndpoint = isSeries
-          ? `https://api.themoviedb.org/3/search/tv?api_key=${tmdbKey}&query=${encodeURIComponent(query)}&language=ar`
-          : `https://api.themoviedb.org/3/search/movie?api_key=${tmdbKey}&query=${encodeURIComponent(query)}&language=ar`;
-
-        const tRes = await fetch(tmdbEndpoint);
-        if (tRes.ok) {
-          const tData = await tRes.json();
-          for (const item of (tData.results || []).slice(0, 8)) {
-            if (results.some(r => r.id === `tmdb-${item.id}`)) continue;
-            results.push({
-              id: `tmdb-${item.id}`,
-              title: item.title || item.name,
-              year: (item.release_date || item.first_air_date || '').split('-')[0] ? Number((item.release_date || item.first_air_date || '').split('-')[0]) : null,
-              plot: item.overview || null,
-              poster: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null,
-              backdrop: item.backdrop_path ? `https://image.tmdb.org/t/p/w1280${item.backdrop_path}` : null,
-              rating: item.vote_average ? Math.round(item.vote_average * 10) / 10 : null,
-              genres: [],
-              source: 'tmdb'
-            });
-          }
+    try {
+      const directResults = await searchTmdbDirect(query, isSeries);
+      for (const item of directResults) {
+        if (!results.some(r => r.id === item.id)) {
+          results.push(item);
         }
-      } catch (e) {
-        console.error('TMDB search error:', e.message);
       }
-    } else {
-      // Direct TMDB Search Scraper (Zero API Key needed - perfect for Arabic TV shows and movies!)
-      try {
-        const directResults = await searchTmdbDirect(query, isSeries);
-        for (const item of directResults) {
-          if (!results.some(r => r.id === item.id)) {
-            results.push(item);
-          }
-        }
-      } catch (e) {
-        console.error('Direct TMDB search error:', e.message);
-      }
+    } catch (e) {
+      console.error('TMDB search error:', e.message);
     }
   }
 

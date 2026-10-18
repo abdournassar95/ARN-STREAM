@@ -39,7 +39,7 @@ router.get('/', (req, res) => {
   params.push(Number(limit), Number(offset));
   const series = db.prepare(sql).all(...params);
   const enriched = series.map(s => {
-    const poster = db.prepare(`SELECT id FROM images WHERE media_type='series' AND media_id=? AND (image_type='poster' OR image_type='season_poster') ORDER BY is_primary DESC, id DESC LIMIT 1`).get(s.id);
+    const poster = db.prepare(`SELECT id, hash FROM images WHERE media_type='series' AND media_id=? AND (image_type='poster' OR image_type='season_poster') ORDER BY is_primary DESC, id DESC LIMIT 1`).get(s.id);
     const tags = db.prepare(`SELECT tags.* FROM tags JOIN media_tags ON tags.id=media_tags.tag_id WHERE media_tags.media_type='series' AND media_tags.media_id=?`).all(s.id);
     return { ...s, poster: poster ? `/api/image/${poster.id}/thumb` : null, tags };
   });

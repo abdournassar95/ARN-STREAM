@@ -362,7 +362,7 @@ class PersonalStreamTrayApp:
                 if resp.status == 200:
                     self.tray_icon.showMessage(APP_NAME, "تم بدء فحص ومزامنة المكتبة في الخلفية...", QSystemTrayIcon.MessageIcon.Information, 2500)
                 elif resp.status in (401, 403):
-                    self.tray_icon.showMessage(APP_NAME, "يتطلب فحص المكتبة تسجيل الدخول بحساب المشرف عبر المتصفح أولاً.", QSystemTrayIcon.MessageIcon.Warning, 3500)
+                    self.tray_icon.showMessage(APP_NAME, "يتطلب فحص المكتبة صلاحيات المشرف أو إعادة تشغيل البرنامج.", QSystemTrayIcon.MessageIcon.Warning, 3500)
                 else:
                     self.tray_icon.showMessage(APP_NAME, f"حالة الطلب: {resp.status}", QSystemTrayIcon.MessageIcon.Information, 2500)
             except Exception as e:

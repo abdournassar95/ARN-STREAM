@@ -6,8 +6,8 @@ import { deleteRecord } from '../services/database-manager.js';
 
 const router = express.Router();
 
-// Require authentication for all music/audio endpoints
-router.use(requireAuth);
+// Require authentication for all music/audio endpoints only
+router.use(['/artists', '/albums', '/tracks'], requireAuth);
 
 // Artists
 router.get('/artists', (req, res) => {

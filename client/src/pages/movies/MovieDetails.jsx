@@ -120,8 +120,8 @@ export default function MovieDetails() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [selectedBackdropIndex, setSelectedBackdropIndex] = useState(0);
-  const [selectedPosterIndex, setSelectedPosterIndex] = useState(0);
+  const [selectedBackdropIndex, setSelectedBackdropIndex] = useState(null);
+  const [selectedPosterIndex, setSelectedPosterIndex] = useState(null);
   const [lightboxImage, setLightboxImage] = useState(null);
   const [copiedPath, setCopiedPath] = useState(false);
 
@@ -259,10 +259,12 @@ export default function MovieDetails() {
 
   const backdropsList = movie.backdrops || [];
   const postersList = movie.posters || [];
-  const safeBackdropIndex = selectedBackdropIndex >= backdropsList.length ? 0 : selectedBackdropIndex;
-  const safePosterIndex = selectedPosterIndex >= postersList.length ? 0 : selectedPosterIndex;
-  const primaryBackdrop = backdropsList[safeBackdropIndex]?.url || backdropsList[0]?.url;
-  const primaryPoster = postersList[safePosterIndex]?.url || postersList.find(p => p.is_primary)?.url || postersList[0]?.url;
+  const primaryBackdrop = (selectedBackdropIndex !== null && backdropsList[selectedBackdropIndex]?.url)
+    || backdropsList.find(b => b.is_primary)?.url
+    || backdropsList[0]?.url;
+  const primaryPoster = (selectedPosterIndex !== null && postersList[selectedPosterIndex]?.url)
+    || postersList.find(p => p.is_primary)?.url
+    || postersList[0]?.url;
   const playbackPos = movie.playback?.position || 0;
   const playbackPercent = movie.duration && playbackPos ? Math.min(100, Math.round((playbackPos / movie.duration) * 100)) : 0;
   const otherMovies = (Array.isArray(moreMoviesData) ? moreMoviesData : moreMoviesData?.data || [])
@@ -646,7 +648,7 @@ export default function MovieDetails() {
               {/* Horizontal Scrollable Gallery */}
               <div className="flex gap-4 overflow-x-auto pb-2 pt-1 custom-scrollbar">
                 {backdropsList.map((bd, idx) => {
-                  const isSelected = idx === selectedBackdropIndex;
+                  const isSelected = selectedBackdropIndex === idx || (selectedBackdropIndex === null && (bd.is_primary || idx === 0));
                   return (
                     <div
                       key={bd.id || idx}
@@ -728,7 +730,7 @@ export default function MovieDetails() {
               </div>
               <div className="flex gap-3 overflow-x-auto pb-2 pt-1 custom-scrollbar">
                 {postersList.map((p, idx) => {
-                  const isSelected = idx === selectedPosterIndex;
+                  const isSelected = selectedPosterIndex === idx || (selectedPosterIndex === null && (p.is_primary || idx === 0));
                   return (
                     <div
                       key={p.id || idx}
@@ -1013,6 +1015,10 @@ export default function MovieDetails() {
       <EditMetadataModal
         isOpen={isEditModalOpen}
         onClose={() => setIsEditModalOpen(false)}
+        onSave={() => {
+          setSelectedPosterIndex(null);
+          setSelectedBackdropIndex(null);
+        }}
         item={movie}
         type="movie"
       />

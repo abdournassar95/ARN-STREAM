@@ -79,7 +79,7 @@ export default function EditLibraryCoversModal({ library, isOpen, onClose, onSav
     try {
       setSaving(true);
       await saveLibraryCustomCovers(library.id, []);
-      if (onSaved) onSaved();
+      if (onSaved) onSaved([]);
       onClose();
     } catch (err) {
       console.error('Failed to reset covers:', err);
@@ -92,7 +92,7 @@ export default function EditLibraryCoversModal({ library, isOpen, onClose, onSav
     try {
       setSaving(true);
       await saveLibraryCustomCovers(library.id, selectedCovers);
-      if (onSaved) onSaved();
+      if (onSaved) onSaved(selectedCovers);
       onClose();
     } catch (err) {
       console.error('Failed to save covers:', err);
@@ -344,7 +344,7 @@ export default function EditLibraryCoversModal({ library, isOpen, onClose, onSav
                     {/* Gradient info overlay */}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-black/40 opacity-80 group-hover:opacity-95 transition" />
 
-                    {/* Type Badge (Artist, Album, Upload) */}
+                    {/* Type Badge (Movie, Show, Play, Doc, Artist, Album, Upload) */}
                     {item.type && (
                       <div className="absolute top-1.5 start-1.5">
                         <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold shadow ${
@@ -352,9 +352,29 @@ export default function EditLibraryCoversModal({ library, isOpen, onClose, onSav
                             ? 'bg-emerald-500/90 text-black'
                             : item.type === 'upload'
                             ? 'bg-amber-500/90 text-black'
-                            : 'bg-black/60 text-white/90 border border-white/20'
+                            : item.type === 'show' || item.type === 'series'
+                            ? 'bg-sky-500/90 text-white'
+                            : item.type === 'play'
+                            ? 'bg-amber-500/90 text-black'
+                            : item.type === 'documentary'
+                            ? 'bg-yellow-500/90 text-black'
+                            : item.type === 'movie'
+                            ? 'bg-red-600/90 text-white'
+                            : 'bg-teal-500/90 text-black'
                         }`}>
-                          {item.type === 'artist' ? (isArabic ? 'فنان' : 'Artist') : (item.type === 'upload' ? (isArabic ? 'مرفوع' : 'Upload') : (isArabic ? 'ألبوم' : 'Album'))}
+                          {item.type === 'artist'
+                            ? (isArabic ? 'فنان' : 'Artist')
+                            : item.type === 'upload'
+                            ? (isArabic ? 'مرفوع' : 'Upload')
+                            : item.type === 'show' || item.type === 'series'
+                            ? (isArabic ? 'مسلسل' : 'Series')
+                            : item.type === 'play'
+                            ? (isArabic ? 'مسرحية' : 'Play')
+                            : item.type === 'documentary'
+                            ? (isArabic ? 'وثائقي' : 'Doc')
+                            : item.type === 'movie'
+                            ? (isArabic ? 'فيلم' : 'Movie')
+                            : (isArabic ? 'ألبوم' : 'Album')}
                         </span>
                       </div>
                     )}

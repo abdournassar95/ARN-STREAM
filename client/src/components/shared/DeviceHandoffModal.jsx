@@ -79,7 +79,7 @@ export default function DeviceHandoffModal() {
     }
   }, [isModalOpen, deviceName, fetchDevices]);
 
-  if (!isModalOpen || !currentMediaToCast) return null;
+  if (!isModalOpen) return null;
 
   const handleSaveName = (e) => {
     e.preventDefault();
@@ -90,12 +90,15 @@ export default function DeviceHandoffModal() {
   };
 
   const handleTransfer = async (targetDev) => {
+    if (!currentMediaToCast) return;
     setTransferringId(targetDev.id);
     const success = await transferMedia(targetDev.id, targetDev.name, currentMediaToCast, pauseLocal, targetDev.isDlna);
     setTransferringId(null);
   };
 
-  const directUrl = `${window.location.origin}/watch/${currentMediaToCast.type}/${currentMediaToCast.id}?t=${Math.floor(currentMediaToCast.currentTime || 0)}&autoPlay=true`;
+  const directUrl = currentMediaToCast
+    ? `${window.location.origin}/watch/${currentMediaToCast.type}/${currentMediaToCast.id}?t=${Math.floor(currentMediaToCast.currentTime || 0)}&autoPlay=true`
+    : window.location.origin;
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(directUrl).then(() => {
@@ -162,31 +165,39 @@ export default function DeviceHandoffModal() {
             connectToDevice(dev);
             closeCastModal();
           }}
-          className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-200/70 hover:bg-slate-200 dark:bg-white/10 dark:hover:bg-white/20 text-text font-bold text-xs transition active:scale-95"
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs transition active:scale-95 shadow-sm ${
+            !currentMediaToCast
+              ? (dev.isDlna
+                  ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:brightness-110 text-white'
+                  : 'bg-primaryMovies hover:brightness-110 text-white')
+              : 'bg-slate-200/70 hover:bg-slate-200 dark:bg-white/10 dark:hover:bg-white/20 text-text'
+          }`}
           title={isRtl ? 'التحكم الكامل في هذا الجهاز' : 'Full Remote Control'}
         >
-          <Sliders size={12} className={dev.isDlna ? 'text-emerald-400' : 'text-rose-500'} />
-          <span className="hidden sm:inline">{isRtl ? 'تحكم' : 'Control'}</span>
+          <Sliders size={12} className={!currentMediaToCast ? 'text-white' : (dev.isDlna ? 'text-emerald-400' : 'text-rose-500')} />
+          <span>{isRtl ? 'تحكم كامل' : 'Control'}</span>
         </button>
 
         {/* Cast current media */}
-        <button
-          onClick={() => handleTransfer(dev)}
-          disabled={transferringId === dev.id}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-white font-bold text-xs shadow-md active:scale-95 transition disabled:opacity-50 ${
-            dev.isDlna
-              ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:brightness-110'
-              : 'bg-primaryMovies hover:brightness-110'
-          }`}
-          title={isRtl ? 'بث وتشغيل فوري' : 'Cast immediately'}
-        >
-          {transferringId === dev.id ? (
-            <RefreshCw size={12} className="animate-spin" />
-          ) : (
-            <Share2 size={12} />
-          )}
-          <span>{isRtl ? 'بث' : 'Cast'}</span>
-        </button>
+        {currentMediaToCast && (
+          <button
+            onClick={() => handleTransfer(dev)}
+            disabled={transferringId === dev.id}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-white font-bold text-xs shadow-md active:scale-95 transition disabled:opacity-50 ${
+              dev.isDlna
+                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:brightness-110'
+                : 'bg-primaryMovies hover:brightness-110'
+            }`}
+            title={isRtl ? 'بث وتشغيل فوري' : 'Cast immediately'}
+          >
+            {transferringId === dev.id ? (
+              <RefreshCw size={12} className="animate-spin" />
+            ) : (
+              <Share2 size={12} />
+            )}
+            <span>{isRtl ? 'بث' : 'Cast'}</span>
+          </button>
+        )}
       </div>
     </div>
   );
@@ -207,8 +218,16 @@ export default function DeviceHandoffModal() {
               <Cast size={20} />
             </div>
             <div>
-              <h2 className="text-lg font-bold">{isRtl ? 'نقل المشاهدة إلى جهاز آخر' : 'Cast to Another Device'}</h2>
-              <p className="text-xs text-muted">{isRtl ? 'إرسال العرض لشاشتك الذكية أو هاتفك واستئنافه فوراً' : 'Send playback to your Smart TV or phone instantly'}</p>
+              <h2 className="text-lg font-bold">
+                {currentMediaToCast
+                  ? (isRtl ? 'نقل المشاهدة إلى جهاز آخر' : 'Cast to Another Device')
+                  : (isRtl ? 'بث وتحكم الأجهزة على الشبكة' : 'Network Devices & Remote Control')}
+              </h2>
+              <p className="text-xs text-muted">
+                {currentMediaToCast
+                  ? (isRtl ? 'إرسال العرض لشاشتك الذكية أو هاتفك واستئنافه فوراً' : 'Send playback to your Smart TV or phone instantly')
+                  : (isRtl ? 'التحكم بالشاشات الذكية والأجهزة المتصلة على نفس الشبكة' : 'Control Smart TVs and connected devices on your home network')}
+              </p>
             </div>
           </div>
           <button
@@ -219,26 +238,28 @@ export default function DeviceHandoffModal() {
           </button>
         </div>
 
-        {/* Media Preview Card */}
-        <div className="flex items-center gap-3.5 p-3 rounded-2xl bg-slate-50 dark:bg-surface/60 border border-slate-200/80 dark:border-white/5">
-          {currentMediaToCast.poster ? (
-            <div className="w-12 h-16 rounded-xl overflow-hidden bg-surfaceHover flex-shrink-0 shadow-sm border border-border/40">
-              <img src={currentMediaToCast.poster} alt={currentMediaToCast.title || "Poster"} className="w-full h-full object-cover" />
-            </div>
-          ) : (
-            <div className="w-12 h-16 rounded-xl bg-primaryMovies/10 text-primaryMovies flex items-center justify-center flex-shrink-0">
-              <Tv size={24} />
-            </div>
-          )}
-          <div className="flex-1 min-w-0">
-            <div className="font-semibold text-sm truncate text-text">{currentMediaToCast.title}</div>
-            <div className="text-xs text-muted mt-1 flex items-center gap-2">
-              <span className="font-mono text-primaryMovies font-semibold">{formatTime(currentMediaToCast.currentTime)}</span>
-              <span>/</span>
-              <span className="font-mono">{formatTime(currentMediaToCast.duration)}</span>
+        {/* Media Preview Card (Only if media is currently being cast) */}
+        {currentMediaToCast && (
+          <div className="flex items-center gap-3.5 p-3 rounded-2xl bg-slate-50 dark:bg-surface/60 border border-slate-200/80 dark:border-white/5">
+            {currentMediaToCast.poster ? (
+              <div className="w-12 h-16 rounded-xl overflow-hidden bg-surfaceHover flex-shrink-0 shadow-sm border border-border/40">
+                <img src={currentMediaToCast.poster} alt={currentMediaToCast.title || "Poster"} className="w-full h-full object-cover" />
+              </div>
+            ) : (
+              <div className="w-12 h-16 rounded-xl bg-primaryMovies/10 text-primaryMovies flex items-center justify-center flex-shrink-0">
+                <Tv size={24} />
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              <div className="font-semibold text-sm truncate text-text">{currentMediaToCast.title}</div>
+              <div className="text-xs text-muted mt-1 flex items-center gap-2">
+                <span className="font-mono text-primaryMovies font-semibold">{formatTime(currentMediaToCast.currentTime)}</span>
+                <span>/</span>
+                <span className="font-mono">{formatTime(currentMediaToCast.duration)}</span>
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* This Device Banner */}
         <div className="p-3.5 rounded-2xl bg-slate-100/70 dark:bg-surface/40 border border-slate-200/70 dark:border-white/5 flex flex-col gap-2">
@@ -366,22 +387,28 @@ export default function DeviceHandoffModal() {
           )}
         </div>
 
-        {/* Options */}
-        <div className="flex items-center gap-2 px-1 text-xs text-muted cursor-pointer" onClick={() => setPauseLocal(!pauseLocal)}>
-          <input
-            type="checkbox"
-            checked={pauseLocal}
-            onChange={e => setPauseLocal(e.target.checked)}
-            className="accent-primaryMovies rounded cursor-pointer"
-          />
-          <span>{isRtl ? 'إيقاف التشغيل تلقائياً على هذا الجهاز بعد النقل' : 'Pause playback on this device after casting'}</span>
-        </div>
+        {/* Options (Only when casting active media) */}
+        {currentMediaToCast && (
+          <div className="flex items-center gap-2 px-1 text-xs text-muted cursor-pointer" onClick={() => setPauseLocal(!pauseLocal)}>
+            <input
+              type="checkbox"
+              checked={pauseLocal}
+              onChange={e => setPauseLocal(e.target.checked)}
+              className="accent-primaryMovies rounded cursor-pointer"
+            />
+            <span>{isRtl ? 'إيقاف التشغيل تلقائياً على هذا الجهاز بعد النقل' : 'Pause playback on this device after casting'}</span>
+          </div>
+        )}
 
         {/* Instant Direct Link / QR Fallback */}
         <div className="border-t border-slate-100 dark:border-white/10 pt-4 space-y-2">
           <div className="text-xs font-semibold text-muted flex items-center gap-1">
             <ExternalLink size={13} className="text-primaryMovies" />
-            <span>{isRtl ? 'رابط التشغيل المباشر لأي متصفح آخر:' : 'Direct playback URL for another browser:'}</span>
+            <span>
+              {currentMediaToCast
+                ? (isRtl ? 'رابط التشغيل المباشر لأي متصفح آخر:' : 'Direct playback URL for another browser:')
+                : (isRtl ? 'رابط خادم ARN Stream للربط والتشغيل:' : 'Direct ARN Stream Server URL:')}
+            </span>
           </div>
           <div className="flex items-center gap-2">
             <input

@@ -48,7 +48,8 @@ export default function DashboardDatabase() {
   } = useQuery({
     queryKey: ['database-stats'],
     queryFn: fetchDatabaseStats,
-    refetchInterval: 30000
+    staleTime: 0,
+    refetchInterval: 15000
   });
 
   const {
@@ -74,6 +75,7 @@ export default function DashboardDatabase() {
   } = useQuery({
     queryKey: ['database-duplicates'],
     queryFn: fetchDuplicates,
+    staleTime: 0,
     enabled: subTab === 'duplicates'
   });
 
@@ -175,6 +177,7 @@ export default function DashboardDatabase() {
     mutationFn: cleanOrphanedData,
     onSuccess: (res) => {
       showNotification(res.message || 'تم تنظيف السجلات اليتيمة بنجاح.');
+      queryClient.invalidateQueries({ queryKey: ['database-stats'] });
       refetchStats();
       refetchLibraries();
       if (subTab === 'libraries') refetchLibContents();
@@ -186,6 +189,7 @@ export default function DashboardDatabase() {
     mutationFn: (dryRun) => cleanMissingFiles(dryRun),
     onSuccess: (res) => {
       showNotification(res.message || 'تم تنظيف السجلات المفقودة بنجاح.');
+      queryClient.invalidateQueries({ queryKey: ['database-stats'] });
       refetchStats();
       refetchLibraries();
       if (subTab === 'libraries') refetchLibContents();
@@ -198,6 +202,8 @@ export default function DashboardDatabase() {
     mutationFn: cleanDuplicates,
     onSuccess: (res) => {
       showNotification(res.message || 'تم دمج وتنظيف المكررات بنجاح.');
+      queryClient.invalidateQueries({ queryKey: ['database-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['database-duplicates'] });
       refetchStats();
       refetchDuplicates();
       refetchLibraries();
@@ -211,6 +217,7 @@ export default function DashboardDatabase() {
     mutationFn: vacuumDatabase,
     onSuccess: (res) => {
       showNotification(res.message || 'تم ضغط وتسريع قاعدة البيانات بنجاح.');
+      queryClient.invalidateQueries({ queryKey: ['database-stats'] });
       refetchStats();
     },
     onError: (err) => showNotification(err.response?.data?.error?.message || err.message, 'error')
@@ -348,16 +355,29 @@ export default function DashboardDatabase() {
     );
   };
 
-  // Total issues
-  const totalIssuesCount = useMemo(() => {
+  // Unified counts calculation ensuring 100% mathematical consistency across all cards & badges
+  const totalOrphanedCount = useMemo(() => {
     if (!stats?.issues) return 0;
     const {
       emptySeries = 0, emptySeasons = 0, emptyAlbums = 0, emptyArtists = 0,
-      orphanedImages = 0, missingFilesCount = 0,
-      duplicateMoviesCount = 0, duplicateTracksCount = 0, duplicateEpisodesCount = 0
+      orphanedImages = 0
     } = stats.issues;
-    return emptySeries + emptySeasons + emptyAlbums + emptyArtists + orphanedImages + missingFilesCount + duplicateMoviesCount + duplicateTracksCount + duplicateEpisodesCount;
+    return emptySeries + emptySeasons + emptyAlbums + emptyArtists + orphanedImages;
   }, [stats]);
+
+  const totalDuplicatesCount = useMemo(() => {
+    if (!stats?.issues) return 0;
+    const {
+      duplicateMoviesCount = 0, duplicateTracksCount = 0,
+      duplicateEpisodesCount = 0, duplicateArtistsCount = 0
+    } = stats.issues;
+    return duplicateMoviesCount + duplicateTracksCount + duplicateEpisodesCount + duplicateArtistsCount;
+  }, [stats]);
+
+  const totalIssuesCount = useMemo(() => {
+    if (!stats?.issues) return 0;
+    return totalOrphanedCount + (stats.issues.missingFilesCount || 0) + totalDuplicatesCount;
+  }, [stats, totalOrphanedCount, totalDuplicatesCount]);
 
   const headingStyle = { color: 'var(--dash-heading-text)' };
   const mutedStyle = { color: 'var(--dash-muted-text)' };
@@ -487,6 +507,11 @@ export default function DashboardDatabase() {
             >
               <Sparkles size={14} />
               <span>{isRtl ? 'المكررات' : 'Duplicates'}</span>
+              {totalDuplicatesCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold">
+                  {totalDuplicatesCount}
+                </span>
+              )}
             </button>
           </div>
         </div>
@@ -540,14 +565,14 @@ export default function DashboardDatabase() {
               <div className="dash-card-inner p-3.5 flex flex-col justify-between">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium" style={mutedStyle}>{isRtl ? 'السجلات اليتيمة' : 'Orphaned'}</span>
-                  <Trash2 size={16} className={stats?.issues?.orphanedImages > 0 || stats?.issues?.emptySeries > 0 ? 'text-rose-400' : 'text-emerald-400'} />
+                  <Trash2 size={16} className={totalOrphanedCount > 0 ? 'text-rose-400' : 'text-emerald-400'} />
                 </div>
                 <div className="mt-2">
-                  <div className="text-lg sm:text-xl font-mono font-black" style={{ color: (stats?.issues?.emptySeries + stats?.issues?.emptySeasons + stats?.issues?.orphanedImages > 0) ? '#f87171' : '#34d399' }}>
-                    {(stats?.issues?.emptySeries || 0) + (stats?.issues?.emptySeasons || 0) + (stats?.issues?.orphanedImages || 0) + (stats?.issues?.emptyAlbums || 0) + (stats?.issues?.emptyArtists || 0)}
+                  <div className="text-lg sm:text-xl font-mono font-black" style={{ color: totalOrphanedCount > 0 ? '#f87171' : '#34d399' }}>
+                    {totalOrphanedCount}
                   </div>
                   <div className="text-[10px] mt-0.5 text-slate-400">
-                    {stats?.issues?.orphanedImages || 0} {isRtl ? 'صورة' : 'images'} • {stats?.issues?.emptySeries || 0} {isRtl ? 'مسلسل فارغ' : 'empty series'}
+                    {stats?.issues?.orphanedImages || 0} {isRtl ? 'صورة' : 'images'} • {(stats?.issues?.emptySeries || 0) + (stats?.issues?.emptySeasons || 0) + (stats?.issues?.emptyAlbums || 0) + (stats?.issues?.emptyArtists || 0)} {isRtl ? 'حاوية فارغة' : 'empty containers'}
                   </div>
                 </div>
               </div>
@@ -594,7 +619,7 @@ export default function DashboardDatabase() {
                 </div>
                 <div className="flex items-center justify-between pt-2 border-t border-slate-800/60">
                   <span className="text-[11px] text-slate-400 font-mono">
-                    {isRtl ? 'المرصود حالياً:' : 'Detected:'} {(stats?.issues?.emptySeries || 0) + (stats?.issues?.emptySeasons || 0) + (stats?.issues?.orphanedImages || 0)} {isRtl ? 'عنصر' : 'items'}
+                    {isRtl ? 'المرصود حالياً:' : 'Detected:'} {totalOrphanedCount} {isRtl ? 'عنصر' : 'items'}
                   </span>
                   <button
                     onClick={() => cleanOrphansMut.mutate()}
@@ -668,7 +693,7 @@ export default function DashboardDatabase() {
                 </div>
                 <div className="flex items-center justify-between pt-2 border-t border-slate-800/60">
                   <span className="text-[11px] text-slate-400 font-mono">
-                    {isRtl ? 'المكررات:' : 'Duplicates:'} {(stats?.issues?.duplicateMoviesCount || 0) + (stats?.issues?.duplicateTracksCount || 0)}
+                    {isRtl ? 'المكررات:' : 'Duplicates:'} {totalDuplicatesCount}
                   </span>
                   <button
                     onClick={() => cleanDuplicatesMut.mutate()}

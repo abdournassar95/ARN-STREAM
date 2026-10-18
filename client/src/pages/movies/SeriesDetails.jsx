@@ -1234,6 +1234,7 @@ export default function SeriesDetails() {
       <EditMetadataModal
         isOpen={isEditModalOpen}
         onClose={() => setIsEditModalOpen(false)}
+        onSave={() => queryClient.invalidateQueries(['series', id])}
         item={s}
         type="series"
       />

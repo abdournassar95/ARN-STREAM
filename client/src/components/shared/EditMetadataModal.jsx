@@ -5,7 +5,7 @@ import { updateMetadata, updatePoster, searchMetadata, deletePoster, deleteBackd
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import Spinner from './Spinner';
 
-export default function EditMetadataModal({ isOpen, onClose, item, type = 'movie' }) {
+export default function EditMetadataModal({ isOpen, onClose, item, type = 'movie', onSave }) {
   const { t, i18n } = useTranslation();
   const isArabic = i18n.language === 'ar';
   const qc = useQueryClient();
@@ -77,12 +77,42 @@ export default function EditMetadataModal({ isOpen, onClose, item, type = 'movie
       });
     },
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: [type, String(item.id)] });
-      await qc.invalidateQueries({ queryKey: [type, Number(item.id)] });
-      await qc.invalidateQueries({ queryKey: ['library'] });
-      await qc.invalidateQueries({ queryKey: ['series'] });
-      await qc.invalidateQueries({ queryKey: ['movies'] });
-      await qc.refetchQueries({ queryKey: [type, String(item.id)] });
+      const parsedTags = genres
+        ? (Array.isArray(genres) ? genres : String(genres).split(',')).map(s => s.trim()).filter(Boolean).map((name, i) => ({ id: `t-${i}`, name }))
+        : [];
+
+      const updater = (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          title: title || old.title,
+          year: year ? Number(year) : old.year,
+          plot: plot !== undefined ? plot : old.plot,
+          rating: rating ? Number(rating) : old.rating,
+          tags: parsedTags.length > 0 ? parsedTags : old.tags
+        };
+      };
+
+      qc.setQueryData([type, String(item.id)], updater);
+      qc.setQueryData([type, Number(item.id)], updater);
+
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: [type] }),
+        qc.invalidateQueries({ queryKey: ['movies'] }),
+        qc.invalidateQueries({ queryKey: ['series'] }),
+        qc.invalidateQueries({ queryKey: ['library'] }),
+        qc.invalidateQueries({ queryKey: ['libraries'] }),
+        qc.invalidateQueries({ queryKey: ['movies-library'] }),
+        qc.invalidateQueries({ queryKey: ['movies-similar'] }),
+        qc.invalidateQueries({ queryKey: ['related-series'] })
+      ]);
+
+      await Promise.all([
+        qc.refetchQueries({ queryKey: [type, String(item.id)], type: 'active' }),
+        qc.refetchQueries({ queryKey: [type, Number(item.id)], type: 'active' })
+      ]);
+
+      if (onSave) onSave({ title, year, plot, rating, genres });
       onClose();
     },
     onError: (err) => {
@@ -96,16 +126,35 @@ export default function EditMetadataModal({ isOpen, onClose, item, type = 'movie
       return await updatePoster(type, item.id, payload, 'poster');
     },
     onSuccess: async (res) => {
-      if (res?.data?.thumb || res?.data?.full) {
-        setLocalPoster(res.data.thumb || res.data.full);
+      const newThumb = res?.data?.thumb || res?.data?.full;
+      const newFull = res?.data?.full || res?.data?.thumb;
+      if (newThumb) {
+        setLocalPoster(newThumb);
       }
-      await qc.invalidateQueries({ queryKey: [type, String(item.id)] });
-      await qc.invalidateQueries({ queryKey: [type, Number(item.id)] });
+      const updater = (old) => {
+        if (!old) return old;
+        const newImgObj = {
+          id: res?.data?.id || Date.now(),
+          url: newFull,
+          thumb: newThumb,
+          is_primary: true
+        };
+        const oldPosters = (old.posters || []).map(p => ({ ...p, is_primary: false }));
+        return {
+          ...old,
+          poster: newThumb,
+          posters: [newImgObj, ...oldPosters]
+        };
+      };
+      qc.setQueryData([type, String(item.id)], updater);
+      qc.setQueryData([type, Number(item.id)], updater);
+
+      await qc.invalidateQueries({ queryKey: [type] });
       await qc.invalidateQueries({ queryKey: ['library'] });
       await qc.invalidateQueries({ queryKey: ['series'] });
       await qc.invalidateQueries({ queryKey: ['movies'] });
-      await qc.refetchQueries({ queryKey: [type, String(item.id)] });
-      await qc.refetchQueries({ queryKey: [type, Number(item.id)] });
+      await qc.refetchQueries({ queryKey: [type, String(item.id)], type: 'active' });
+      await qc.refetchQueries({ queryKey: [type, Number(item.id)], type: 'active' });
     }
   });
 
@@ -114,16 +163,35 @@ export default function EditMetadataModal({ isOpen, onClose, item, type = 'movie
       return await updatePoster(type, item.id, payload, 'backdrop');
     },
     onSuccess: async (res) => {
-      if (res?.data?.thumb || res?.data?.full) {
-        setLocalBackdrop(res.data.thumb || res.data.full);
+      const newThumb = res?.data?.thumb || res?.data?.full;
+      const newFull = res?.data?.full || res?.data?.thumb;
+      if (newFull) {
+        setLocalBackdrop(newFull);
       }
-      await qc.invalidateQueries({ queryKey: [type, String(item.id)] });
-      await qc.invalidateQueries({ queryKey: [type, Number(item.id)] });
+      const updater = (old) => {
+        if (!old) return old;
+        const newImgObj = {
+          id: res?.data?.id || Date.now(),
+          url: newFull,
+          thumb: newThumb,
+          is_primary: true
+        };
+        const oldBackdrops = (old.backdrops || []).map(b => ({ ...b, is_primary: false }));
+        return {
+          ...old,
+          backdrop: newFull,
+          backdrops: [newImgObj, ...oldBackdrops]
+        };
+      };
+      qc.setQueryData([type, String(item.id)], updater);
+      qc.setQueryData([type, Number(item.id)], updater);
+
+      await qc.invalidateQueries({ queryKey: [type] });
       await qc.invalidateQueries({ queryKey: ['library'] });
       await qc.invalidateQueries({ queryKey: ['series'] });
       await qc.invalidateQueries({ queryKey: ['movies'] });
-      await qc.refetchQueries({ queryKey: [type, String(item.id)] });
-      await qc.refetchQueries({ queryKey: [type, Number(item.id)] });
+      await qc.refetchQueries({ queryKey: [type, String(item.id)], type: 'active' });
+      await qc.refetchQueries({ queryKey: [type, Number(item.id)], type: 'active' });
     }
   });
 
@@ -132,13 +200,12 @@ export default function EditMetadataModal({ isOpen, onClose, item, type = 'movie
     mutationFn: () => deletePoster(type, item.id),
     onSuccess: async () => {
       setLocalPoster(null);
-      await qc.invalidateQueries({ queryKey: [type, String(item.id)] });
-      await qc.invalidateQueries({ queryKey: [type, Number(item.id)] });
+      await qc.invalidateQueries({ queryKey: [type] });
       await qc.invalidateQueries({ queryKey: ['library'] });
       await qc.invalidateQueries({ queryKey: ['series'] });
       await qc.invalidateQueries({ queryKey: ['movies'] });
-      await qc.refetchQueries({ queryKey: [type, String(item.id)] });
-      await qc.refetchQueries({ queryKey: [type, Number(item.id)] });
+      await qc.refetchQueries({ queryKey: [type, String(item.id)], type: 'active' });
+      await qc.refetchQueries({ queryKey: [type, Number(item.id)], type: 'active' });
     }
   });
 
@@ -147,13 +214,12 @@ export default function EditMetadataModal({ isOpen, onClose, item, type = 'movie
     mutationFn: () => deleteBackdrop(type, item.id),
     onSuccess: async () => {
       setLocalBackdrop(null);
-      await qc.invalidateQueries({ queryKey: [type, String(item.id)] });
-      await qc.invalidateQueries({ queryKey: [type, Number(item.id)] });
+      await qc.invalidateQueries({ queryKey: [type] });
       await qc.invalidateQueries({ queryKey: ['library'] });
       await qc.invalidateQueries({ queryKey: ['series'] });
       await qc.invalidateQueries({ queryKey: ['movies'] });
-      await qc.refetchQueries({ queryKey: [type, String(item.id)] });
-      await qc.refetchQueries({ queryKey: [type, Number(item.id)] });
+      await qc.refetchQueries({ queryKey: [type, String(item.id)], type: 'active' });
+      await qc.refetchQueries({ queryKey: [type, Number(item.id)], type: 'active' });
     }
   });
 
@@ -183,8 +249,20 @@ export default function EditMetadataModal({ isOpen, onClose, item, type = 'movie
         genres: newGenres,
         tmdb_id: tmdbIdNum
       });
-      await qc.invalidateQueries({ queryKey: [type, String(item.id)] });
-      await qc.invalidateQueries({ queryKey: [type, Number(item.id)] });
+      const updater = (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          title: newTitle,
+          year: newYear ? Number(newYear) : old.year,
+          plot: newPlot,
+          rating: newRating ? Number(newRating) : old.rating,
+          tags: Array.isArray(res.genres) ? res.genres.map((g, i) => ({ id: `t-${i}`, name: g })) : old.tags
+        };
+      };
+      qc.setQueryData([type, String(item.id)], updater);
+      qc.setQueryData([type, Number(item.id)], updater);
+      await qc.invalidateQueries({ queryKey: [type] });
       await qc.invalidateQueries({ queryKey: ['library'] });
       await qc.invalidateQueries({ queryKey: ['series'] });
       await qc.invalidateQueries({ queryKey: ['movies'] });
@@ -214,13 +292,19 @@ export default function EditMetadataModal({ isOpen, onClose, item, type = 'movie
       const results = await searchMetadata(q, type);
       setSearchResults(results || []);
 
-      // If user requested direct fetch or single direct match found: auto-apply immediately!
-      if (autoApplyIfSingle && results && results.length > 0) {
-        handleApplyResult(results[0]);
+      if (results && results.length > 0) {
+        if (autoApplyIfSingle) {
+          handleApplyResult(results[0]);
+        }
+      } else {
+        setApplyNotice(isArabic ? 'لم يتم العثور على نتائج متطابقة لهذا الرابط أو الاسم' : 'No matching results found for this code or title');
+        setTimeout(() => setApplyNotice(null), 4000);
       }
     } catch (err) {
       console.error('Metadata search failed:', err);
       setSearchResults([]);
+      setApplyNotice(isArabic ? 'حدث خطأ أثناء البحث عن البيانات' : 'Error searching metadata');
+      setTimeout(() => setApplyNotice(null), 4000);
     } finally {
       setIsSearching(false);
     }

@@ -11,8 +11,8 @@ router.use(requireAuth);
 
 function attachImages(movies) {
   return movies.map(m => {
-    const poster = db.prepare(`SELECT id FROM images WHERE media_type='movie' AND media_id=? AND (image_type='poster' OR image_type='season_poster') ORDER BY is_primary DESC, id DESC LIMIT 1`).get(m.id);
-    const backdrop = db.prepare(`SELECT id FROM images WHERE media_type='movie' AND media_id=? AND (image_type='backdrop' OR image_type='fanart') ORDER BY is_primary DESC, id DESC LIMIT 1`).get(m.id);
+    const poster = db.prepare(`SELECT id, hash FROM images WHERE media_type='movie' AND media_id=? AND (image_type='poster' OR image_type='season_poster') ORDER BY is_primary DESC, id DESC LIMIT 1`).get(m.id);
+    const backdrop = db.prepare(`SELECT id, hash FROM images WHERE media_type='movie' AND media_id=? AND (image_type='backdrop' OR image_type='fanart') ORDER BY is_primary DESC, id DESC LIMIT 1`).get(m.id);
     const rating = db.prepare(`SELECT rating FROM ratings WHERE media_type='movie' AND media_id=?`).get(m.id);
     const tags = db.prepare(`
       SELECT tags.* FROM tags JOIN media_tags ON tags.id = media_tags.tag_id
@@ -20,9 +20,9 @@ function attachImages(movies) {
     `).all(m.id);
     return {
       ...m,
-      poster: poster ? `/api/image/${poster.id}/thumb` : null,
+      poster: poster ? `/api/image/${poster.id}/thumb?v=${poster.hash ? poster.hash.slice(0, 8) : poster.id}` : null,
       posterId: poster?.id || null,
-      backdrop: backdrop ? `/api/image/${backdrop.id}/full` : null,
+      backdrop: backdrop ? `/api/image/${backdrop.id}/full?v=${backdrop.hash ? backdrop.hash.slice(0, 8) : backdrop.id}` : null,
       backdropId: backdrop?.id || null,
       rating: rating?.rating || null,
       tags
@@ -123,7 +123,7 @@ function deduplicateImages(list) {
     res.json({
       data: {
         ...movie,
-        posters: poster.map(p => ({ id: p.id, url: `/api/image/${p.id}/full`, thumb: `/api/image/${p.id}/thumb`, is_primary: !!p.is_primary })),
+        posters: poster.map(p => ({ id: p.id, url: `/api/image/${p.id}/full?v=${p.hash ? p.hash.slice(0, 8) : p.id}`, thumb: `/api/image/${p.id}/thumb?v=${p.hash ? p.hash.slice(0, 8) : p.id}`, is_primary: !!p.is_primary })),
         backdrops: backdrop.map(p => ({ id: p.id, url: `/api/image/${p.id}/full`, thumb: `/api/image/${p.id}/thumb`, is_primary: !!p.is_primary })),
         rating: rating?.rating || null,
         review: rating?.review || null,

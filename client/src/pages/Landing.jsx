@@ -1082,7 +1082,24 @@ let currentSections = (homeSectionsOrder || []).map(sec => typeof sec === 'strin
         library={editingLibrary}
         isOpen={Boolean(editingLibrary)}
         onClose={() => setEditingLibrary(null)}
-        onSaved={() => {
+        onSaved={(newCovers) => {
+          if (editingLibrary) {
+            queryClient.setQueryData(['landing'], (old) => {
+              if (!old || !old.libraries) return old;
+              return {
+                ...old,
+                libraries: old.libraries.map(l => 
+                  l.id === editingLibrary.id 
+                    ? { 
+                        ...l, 
+                        covers: (newCovers && newCovers.length > 0) ? newCovers : l.covers,
+                        custom_covers: (newCovers && newCovers.length > 0) ? JSON.stringify(newCovers) : null
+                      } 
+                    : l
+                )
+              };
+            });
+          }
           queryClient.invalidateQueries({ queryKey: ['landing'] });
         }}
       />

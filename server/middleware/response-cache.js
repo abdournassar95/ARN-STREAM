@@ -24,7 +24,8 @@ const NEVER_CACHE = new Set([
   '/api/download',
   '/api/handoff',
   '/api/settings',
-  '/api/search'
+  '/api/search',
+  '/api/database'
 ]);
 
 // ─── Per-endpoint TTL overrides (seconds) ────────────────────────────────────
@@ -57,6 +58,11 @@ function shouldCache(req) {
 
   // Skip DLNA routes
   if (req.path.startsWith('/dlna/')) return false;
+
+  // Skip custom covers and available covers endpoints
+  if (req.path.includes('/available-covers') || req.path.includes('/custom-covers') || req.path.includes('/upload-cover')) {
+    return false;
+  }
 
   // Skip user-specific endpoints
   for (const prefix of NEVER_CACHE) {
@@ -97,7 +103,7 @@ export function responseCacheMiddleware(req, res, next) {
   const cached = responseCache.get(cacheKey);
   if (cached) {
     res.setHeader('X-Response-Cache', 'HIT');
-    res.setHeader('Cache-Control', `private, max-age=${ttl}`);
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
     return res.json(cached);
   }
 
@@ -108,7 +114,7 @@ export function responseCacheMiddleware(req, res, next) {
     if (res.statusCode === 200 && body) {
       responseCache.set(cacheKey, body, ttl);
       res.setHeader('X-Response-Cache', 'MISS');
-      res.setHeader('Cache-Control', `private, max-age=${ttl}`);
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
     }
     return originalJson(body);
   };

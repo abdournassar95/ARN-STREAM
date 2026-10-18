@@ -177,7 +177,7 @@ app.get('/api/image/:id/full', (req, res) => {
     res.setHeader('Cache-Control', 'public, max-age=86400');
     return res.send(svg);
   }
-  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.setHeader('Cache-Control', 'public, max-age=3600, must-revalidate');
   res.sendFile(path.resolve(fileToServe), (err) => {
     if (err && !res.headersSent) {
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="500" height="750" viewBox="0 0 500 750"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#1A1A1A"/><stop offset="100%" stop-color="#2A2A2A"/></linearGradient></defs><rect width="500" height="750" fill="url(#g)"/><text x="250" y="360" text-anchor="middle" fill="#FFF" font-family="Inter,sans-serif" font-size="22" font-weight="600">${img.media_type}</text><text x="250" y="390" text-anchor="middle" fill="#A1A1A1" font-family="Inter,sans-serif" font-size="14">${img.image_type}</text></svg>`;
@@ -205,7 +205,7 @@ app.get('/api/image/:id/thumb', (req, res) => {
     res.setHeader('Cache-Control', 'public, max-age=86400');
     return res.send(svg);
   }
-  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.setHeader('Cache-Control', 'public, max-age=3600, must-revalidate');
   res.sendFile(path.resolve(fileToServe), (err) => {
     if (err && !res.headersSent) {
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450" viewBox="0 0 300 450"><rect width="300" height="450" fill="#1A1A1A"/><text x="150" y="220" text-anchor="middle" fill="#A1A1A1" font-family="sans-serif" font-size="14">${img.media_type}</text></svg>`;
@@ -426,7 +426,7 @@ import { scanImages } from './scanner/image-scanner.js';
 import { cleanMissingFiles, cleanOrphanedData } from './services/database-manager.js';
 
 app.post('/api/scan', (req, res, next) => {
-  const clientIp = req.ip || req.connection?.remoteAddress || '';
+  const clientIp = req.ip || req.socket?.remoteAddress || req.connection?.remoteAddress || '';
   const isLoopback = clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === '::ffff:127.0.0.1' || req.hostname === 'localhost' || req.hostname === '127.0.0.1';
   const hasNoExternalOrigin = !req.headers.origin && !req.headers.referer;
   const internalKey = req.headers['x-arn-internal-key'];

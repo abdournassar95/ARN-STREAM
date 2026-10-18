@@ -26,6 +26,13 @@ export function getInternalKey() {
   return cachedInternalKey;
 }
 
+// Auto-initialize internal key on load so it always exists for desktop tray launcher
+try {
+  getInternalKey();
+} catch (e) {
+  console.error('[Auth] Failed to initialize internal key on load:', e.message);
+}
+
 // Get or initialize JWT secret key
 function getJwtSecret() {
   let secret = getSetting('jwt_secret');
