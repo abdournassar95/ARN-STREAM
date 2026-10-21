@@ -1,6 +1,7 @@
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Play,
   Pause,
@@ -31,13 +32,28 @@ import {
   Sun,
   Contrast,
   Droplets,
-  Sparkles
+  Sparkles,
+  Clock,
+  X,
+  Subtitles,
+  FastForward,
+  Search,
+  Download,
+  Type,
+  Sliders,
+  Palette,
+  Users,
+  Moon,
+  Headphones,
+  Radio
 } from 'lucide-react';
 import client, { savePlayback, saveVolumeSettings, fetchVolumeSettings } from '../../api/client';
 import { usePlayerStore } from '../../store/usePlayerStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useDeviceHandoffStore } from '../../store/useDeviceHandoffStore';
 import { useAuthStore } from '../../store/useAuthStore';
+import WatchPartyModal from '../../components/player/WatchPartyModal';
+import WatchPartyOverlay from '../../components/player/WatchPartyOverlay';
 
 const getAuthToken = () => {
   return localStorage.getItem('arn_auth_token') || '';
@@ -101,9 +117,258 @@ const ASPECT_OPTIONS = [
   },
 ];
 
+// ── Up Next autoplay: card appears UP_NEXT_WINDOW seconds before the end,
+//    the final UP_NEXT_COUNTDOWN seconds are highlighted as a live countdown.
+const UP_NEXT_WINDOW = 30;
+const UP_NEXT_COUNTDOWN = 5;
+
+// ── Chapter-aware Intro / Outro detection ──
+const INTRO_TITLE_RE = /\b(intro|opening|open(ing)? title|theme(song)?|title sequence|begin(ning)?)\b|مقدمة|تتر البداية/i;
+const OUTRO_TITLE_RE = /\b(credit|credits|ending|outro|end(ing)? title|closing( title)?)\b|تتر النهاية|النهاية|اعتمادات/i;
+
+function detectSkipMarker(pos, total, chapters, allowHeuristic) {
+  if (!total || pos <= 0 || pos >= total - 1) return null;
+
+  if (Array.isArray(chapters) && chapters.length > 0) {
+    const first = chapters[0];
+    const last = chapters[chapters.length - 1];
+
+    for (const ch of chapters) {
+      const start = Number(ch.start) || 0;
+      const end = Number(ch.end) || start;
+      if (pos < start || pos > end) continue;
+
+      if (INTRO_TITLE_RE.test(ch.title || '')) {
+        return { type: 'intro', target: Math.min(end, total), chapter: ch };
+      }
+      if (OUTRO_TITLE_RE.test(ch.title || '') && end - start >= 15 && start < total - 10) {
+        return { type: 'outro', target: Math.max(0, total - 1), chapter: ch };
+      }
+    }
+
+    // Unnamed chapters: use position heuristics
+    const firstLen = (Number(first.end) || 0) - (Number(first.start) || 0);
+    if (chapters.length >= 1 && firstLen >= 15 && firstLen <= 180 && pos >= (Number(first.start) || 0) && pos <= (Number(first.end) || 0)) {
+      return { type: 'intro', target: Math.min(Number(first.end), total), chapter: first };
+    }
+    if (chapters.length > 1) {
+      const lastStart = Number(last.start) || 0;
+      const lastLen = (Number(last.end) || 0) - lastStart;
+      if (lastLen >= 20 && lastStart >= total - 180 && lastStart > (Number(first.end) || 0) && pos >= lastStart) {
+        return { type: 'outro', target: Math.max(0, total - 1), chapter: last };
+      }
+    }
+    return null;
+  }
+
+  // Heuristic fallback when the file carries no chapter data
+  if (allowHeuristic && pos >= 10 && pos <= 95 && total > 180) {
+    return { type: 'intro', target: 95, chapter: null };
+  }
+  return null;
+}
+
+// ── Subtitle style settings & WebVTT Parser Architecture ──
+const DEFAULT_SUBTITLE_SETTINGS = {
+  fontFamily: 'Cairo',
+  fontSize: '20px',
+  color: '#FFFFFF',
+  bgColor: '#000000',
+  bgOpacity: 0.75,
+  textShadow: 'drop',
+  position: 'bottom',
+  verticalOffset: 8
+};
+
+function loadSubtitleSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('arn_player_subtitle_settings') || 'null');
+    if (!saved || typeof saved !== 'object') return { ...DEFAULT_SUBTITLE_SETTINGS };
+    const next = { ...DEFAULT_SUBTITLE_SETTINGS, ...saved };
+    if (typeof next.bgColor === 'string' && next.bgColor.includes('rgba')) {
+      const m = next.bgColor.match(/rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*([\d.]+)\s*)?\)/);
+      if (m) {
+        const hx = n => Number(n).toString(16).padStart(2, '0');
+        next.bgColor = `#${hx(m[1])}${hx(m[2])}${hx(m[3])}`;
+        if (m[4] !== undefined) next.bgOpacity = Number(m[4]);
+      } else {
+        next.bgColor = DEFAULT_SUBTITLE_SETTINGS.bgColor;
+      }
+    }
+    next.bgOpacity = Math.max(0, Math.min(1, Number(next.bgOpacity)));
+    if (isNaN(next.bgOpacity)) next.bgOpacity = DEFAULT_SUBTITLE_SETTINGS.bgOpacity;
+    if (!/^#[0-9a-fA-F]{6}$/.test(next.bgColor)) next.bgColor = DEFAULT_SUBTITLE_SETTINGS.bgColor;
+    if (!['none', 'drop', 'outline'].includes(next.textShadow)) next.textShadow = DEFAULT_SUBTITLE_SETTINGS.textShadow;
+    if (!['bottom', 'middle', 'top'].includes(next.position)) next.position = DEFAULT_SUBTITLE_SETTINGS.position;
+    if (!next.fontFamily) next.fontFamily = DEFAULT_SUBTITLE_SETTINGS.fontFamily;
+    if (typeof next.verticalOffset !== 'number' || isNaN(next.verticalOffset)) next.verticalOffset = DEFAULT_SUBTITLE_SETTINGS.verticalOffset;
+    next.verticalOffset = Math.max(2, Math.min(40, next.verticalOffset));
+    return next;
+  } catch {
+    return { ...DEFAULT_SUBTITLE_SETTINGS };
+  }
+}
+
+function hexToRgba(hex, alpha) {
+  const clean = String(hex || '').replace('#', '');
+  if (clean.length !== 6) return `rgba(0, 0, 0, ${alpha})`;
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function buildCueTextShadow(mode) {
+  if (mode === 'none') return 'none';
+  if (mode === 'outline') {
+    return '-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 2px 4px rgba(0,0,0,0.95), 0 0 6px rgba(0,0,0,0.9)';
+  }
+  return '0 2px 4px rgba(0,0,0,0.95), 0 0 4px rgba(0,0,0,0.9)';
+}
+
+function parseVttTime(timeStr) {
+  if (!timeStr) return 0;
+  const clean = timeStr.trim().replace(',', '.');
+  const parts = clean.split(':');
+  let h = 0, m = 0, s = 0;
+  if (parts.length === 3) {
+    h = parseFloat(parts[0]) || 0;
+    m = parseFloat(parts[1]) || 0;
+    s = parseFloat(parts[2]) || 0;
+  } else if (parts.length === 2) {
+    m = parseFloat(parts[0]) || 0;
+    s = parseFloat(parts[1]) || 0;
+  }
+  return h * 3600 + m * 60 + s;
+}
+
+function parseWebVtt(vttContent) {
+  if (!vttContent || typeof vttContent !== 'string') return [];
+  const cleanContent = vttContent.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = cleanContent.split('\n');
+  const cues = [];
+  let start = null;
+  let end = null;
+  let textLines = [];
+  const timeRegex = /((?:\d{1,2}:)?\d{2}:\d{2}[\.,]\d{2,3})\s*-->\s*((?:\d{1,2}:)?\d{2}:\d{2}[\.,]\d{2,3})/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i];
+    const line = rawLine.trim();
+
+    const match = line.match(timeRegex);
+    if (match) {
+      if (start !== null && end !== null && textLines.length > 0) {
+        cues.push({ start, end, text: textLines.join('\n') });
+        textLines = [];
+      }
+      start = parseVttTime(match[1]);
+      end = parseVttTime(match[2]);
+      continue;
+    }
+
+    if (!line) {
+      if (start !== null && end !== null && textLines.length > 0) {
+        cues.push({ start, end, text: textLines.join('\n') });
+        start = null;
+        end = null;
+        textLines = [];
+      }
+      continue;
+    }
+
+    if (line.startsWith('WEBVTT') || line.startsWith('NOTE') || line.startsWith('STYLE') || line.startsWith('REGION')) {
+      continue;
+    }
+
+    if (start !== null && end !== null) {
+      textLines.push(rawLine);
+    }
+  }
+
+  if (start !== null && end !== null && textLines.length > 0) {
+    cues.push({ start, end, text: textLines.join('\n') });
+  }
+
+  cues.sort((a, b) => a.start - b.start);
+  return cues;
+}
+
+function getActiveCuesText(cues, targetTime) {
+  if (!cues || cues.length === 0) return '';
+  let low = 0;
+  let high = cues.length - 1;
+  let startIndex = -1;
+
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    if (cues[mid].end >= targetTime) {
+      startIndex = mid;
+      high = mid - 1;
+    } else {
+      low = mid + 1;
+    }
+  }
+
+  if (startIndex === -1) return '';
+
+  const matches = [];
+  for (let i = startIndex; i < cues.length; i++) {
+    const c = cues[i];
+    if (c.start > targetTime) break;
+    if (targetTime >= c.start && targetTime <= c.end) {
+      matches.push(c.text);
+    }
+  }
+  return matches.join('\n');
+}
+
+function formatSubtitleCueHtml(rawText) {
+  if (!rawText) return '';
+  let s = String(rawText)
+    .replace(/\\N/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\{[^}]+\}/g, '')
+    .replace(/<v[^>]*>/g, '')
+    .replace(/<\/v>/g, '')
+    .replace(/<\d{2}:\d{2}[^>]*>/g, '')
+    .replace(/<c\.([^>]+)>/g, '<span class="$1">')
+    .replace(/<\/c>/g, '</span>')
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
+    .replace(/\n/g, '<br />');
+  return s;
+}
+
+function getSubtitlePositionStyle(settings) {
+  const pos = settings?.position || 'bottom';
+  const offset = typeof settings?.verticalOffset === 'number' ? settings.verticalOffset : 8;
+
+  if (pos === 'top') {
+    return {
+      top: `${offset}%`,
+      bottom: 'auto',
+      transform: 'none'
+    };
+  }
+  if (pos === 'middle') {
+    return {
+      top: '50%',
+      bottom: 'auto',
+      transform: 'translateY(-50%)'
+    };
+  }
+  return {
+    bottom: `${offset}%`,
+    top: 'auto',
+    transform: 'none'
+  };
+}
+
 export default function Player() {
   const { type, id } = useParams(); // type: movie | episode
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const initialTimeParam = searchParams.get('t') ? Number(searchParams.get('t')) : null;
   const autoPlayParam = searchParams.get('autoPlay') === 'true';
@@ -176,6 +441,7 @@ export default function Player() {
   const [showControls, setShowControls] = useState(true);
   const [hoverTime, setHoverTime] = useState(null);
   const [hoverPosition, setHoverPosition] = useState(0);
+  const [hoverThumbUrl, setHoverThumbUrl] = useState(null);
   const [feedback, setFeedback] = useState(null);
   const [playbackError, setPlaybackError] = useState(false);
   const feedbackTimerRef = useRef(null);
@@ -219,21 +485,283 @@ export default function Player() {
   useEffect(() => { upNextTimeRef.current = upNextTime; }, [upNextTime]);
 
   const [nextUp, setNextUp] = useState(null);
-  const [countdown, setCountdown] = useState(10);
+  const [countdown, setCountdown] = useState(null); // seconds remaining, null until inside UP_NEXT_COUNTDOWN
+  const upNextCancelledRef = useRef(false);
+
+  // ── Ambient Glow Mode (Cinematic Dynamic Canvas) ──
+  const ambientCanvasRef = useRef(null);
+  const [ambientMode, setAmbientMode] = useState(() => {
+    try {
+      const saved = localStorage.getItem('arn_player_ambient_mode');
+      return saved !== null ? JSON.parse(saved) : true;
+    } catch {
+      return true;
+    }
+  });
+  const toggleAmbientMode = useCallback(() => {
+    setAmbientMode(prev => {
+      const next = !prev;
+      try { localStorage.setItem('arn_player_ambient_mode', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, []);
+
+  // ── Web Audio API (Dialogue Boost & Night Mode) ──
+  const audioCtxRef = useRef(null);
+  const dialogueFilterRef = useRef(null);
+  const compressorRef = useRef(null);
+  const masterGainRef = useRef(null);
+  const sourceNodeRef = useRef(null);
+  const [audioEnhanceMode, setAudioEnhanceMode] = useState(() => {
+    try {
+      return localStorage.getItem('arn_player_audio_enhance') || 'off';
+    } catch {
+      return 'off';
+    }
+  });
+  const [showAudioEnhanceMenu, setShowAudioEnhanceMenu] = useState(false);
+
+  const initAudioContext = useCallback(() => {
+    if (!videoRef.current) return;
+    if (audioCtxRef.current) {
+      if (audioCtxRef.current.state === 'suspended') {
+        audioCtxRef.current.resume().catch(() => {});
+      }
+      return;
+    }
+    try {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return;
+
+      const ctx = new AudioContextClass();
+      const source = ctx.createMediaElementSource(videoRef.current);
+
+      // Peaking EQ filter centered around 1.5kHz for human voice clarity
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'peaking';
+      filter.frequency.setValueAtTime(1500, ctx.currentTime);
+      filter.Q.setValueAtTime(1.0, ctx.currentTime);
+      filter.gain.setValueAtTime(0, ctx.currentTime);
+
+      // Dynamics Compressor for night-time level balancing
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.setValueAtTime(-24, ctx.currentTime);
+      comp.knee.setValueAtTime(30, ctx.currentTime);
+      comp.ratio.setValueAtTime(12, ctx.currentTime);
+      comp.attack.setValueAtTime(0.003, ctx.currentTime);
+      comp.release.setValueAtTime(0.25, ctx.currentTime);
+
+      const masterGain = ctx.createGain();
+      masterGain.gain.setValueAtTime(1.0, ctx.currentTime);
+
+      source.connect(filter);
+      filter.connect(comp);
+      comp.connect(masterGain);
+      masterGain.connect(ctx.destination);
+
+      audioCtxRef.current = ctx;
+      dialogueFilterRef.current = filter;
+      compressorRef.current = comp;
+      masterGainRef.current = masterGain;
+      sourceNodeRef.current = source;
+
+      const savedMode = localStorage.getItem('arn_player_audio_enhance') || 'off';
+      if (savedMode === 'dialogue') {
+        filter.gain.setValueAtTime(6.0, ctx.currentTime);
+      } else if (savedMode === 'night') {
+        filter.gain.setValueAtTime(3.5, ctx.currentTime);
+        comp.threshold.setValueAtTime(-30, ctx.currentTime);
+      }
+    } catch (err) {
+      console.warn('[Web Audio Init Warning]:', err?.message);
+    }
+  }, []);
+
+  // ── Smart Sleep Timer ──
+  const [sleepTimer, setSleepTimer] = useState(null);
+  const [sleepTimeRemaining, setSleepTimeRemaining] = useState(0);
+  const [showSleepMenu, setShowSleepMenu] = useState(false);
+  const sleepTimerIntervalRef = useRef(null);
+
+  // ── ARN SyncPlay (Watch Party) ──
+  const initialRoomId = searchParams.get('roomId') ? searchParams.get('roomId').toUpperCase() : null;
+  const [syncRoomId, setSyncRoomId] = useState(initialRoomId);
+  const [syncIsHost, setSyncIsHost] = useState(false);
+  const [syncMembers, setSyncMembers] = useState([]);
+  const [syncMessages, setSyncMessages] = useState([]);
+  const [floatingEmojis, setFloatingEmojis] = useState([]);
+  const [showWatchPartyModal, setShowWatchPartyModal] = useState(false);
+  const syncWsRef = useRef(null);
+  const myConnectionIdRef = useRef(null);
+  const tabSessionIdRef = useRef('tab_' + Math.random().toString(36).substring(2, 9));
+  const isApplyingRemoteSyncRef = useRef(false);
+  const authUser = useAuthStore(s => s.user);
   const [showPlaylistDrawer, setShowPlaylistDrawer] = useState(false);
-  const { 
-    stopMusicForVideo, 
-    getNextVideo, 
-    getPrevVideo, 
-    advanceToNextVideo, 
-    advanceToPrevVideo, 
-    videoQueue,
-    videoQueueIndex,
-    setVideoQueueIndex,
-    removeVideoFromQueue,
-    shuffleVideoQueue,
-    clearVideoQueue
-  } = usePlayerStore();
+  const [showSubtitleMenu, setShowSubtitleMenu] = useState(false);
+  const [subtitleTab, setSubtitleTab] = useState('tracks'); // 'tracks' | 'style' | 'search'
+  const [subtitleOffset, setSubtitleOffset] = useState(() => {
+    try {
+      return Number(localStorage.getItem('arn_player_subtitle_offset')) || 0;
+    } catch { return 0; }
+  });
+  const subtitleOffsetRef = useRef(subtitleOffset);
+  useEffect(() => { subtitleOffsetRef.current = subtitleOffset; }, [subtitleOffset]);
+
+  const [subtitleSettings, setSubtitleSettings] = useState(loadSubtitleSettings);
+
+  const updateSubtitleSetting = useCallback((key, value) => {
+    setSubtitleSettings(prev => {
+      const next = { ...prev, [key]: value };
+      try { localStorage.setItem('arn_player_subtitle_settings', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, []);
+
+  const [parsedCues, setParsedCues] = useState([]);
+  const parsedCuesRef = useRef([]);
+  useEffect(() => { parsedCuesRef.current = parsedCues; }, [parsedCues]);
+
+  const [activeCueText, setActiveCueText] = useState('');
+  const activeCueTextRef = useRef('');
+  useEffect(() => { activeCueTextRef.current = activeCueText; }, [activeCueText]);
+
+  const [onlineSubtitles, setOnlineSubtitles] = useState([]);
+  const [searchingOnlineSubs, setSearchingOnlineSubs] = useState(false);
+  const [downloadingSubId, setDownloadingSubId] = useState(null);
+
+  // Derive the active subtitle WebVTT URL cleanly (handling embedded, local files, and downloaded tracks)
+  const getSubtitleUrl = useCallback((sub, offset = subtitleOffset) => {
+    if (!sub) return null;
+    const token = getAuthToken();
+    const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
+    const offsetParam = offset ? `&offset=${offset}` : '';
+
+    if (sub.isEmbedded || sub.streamIndex !== undefined || (sub.index !== undefined && !sub.path)) {
+      const sIndex = sub.streamIndex ?? sub.index ?? 0;
+      return `/api/subtitles/serve?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}&streamIndex=${sIndex}${offsetParam}${tokenParam}`;
+    }
+
+    if (sub.path) {
+      return `/api/subtitles/serve?path=${encodeURIComponent(sub.path)}${offsetParam}${tokenParam}`;
+    }
+
+    if (sub.url) {
+      return sub.url;
+    }
+
+    return null;
+  }, [type, id, subtitleOffset]);
+
+  const currentSubtitleUrl = useMemo(() => {
+    return getSubtitleUrl(selectedSubtitle, subtitleOffset);
+  }, [getSubtitleUrl, selectedSubtitle, subtitleOffset]);
+
+  // Fetch and parse WebVTT file whenever subtitle selection or URL changes
+  useEffect(() => {
+    if (!currentSubtitleUrl || !selectedSubtitle) {
+      setParsedCues([]);
+      setActiveCueText('');
+      return;
+    }
+
+    let active = true;
+    authFetch(currentSubtitleUrl)
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.text();
+      })
+      .then(vttText => {
+        if (!active) return;
+        const cues = parseWebVtt(vttText);
+        setParsedCues(cues);
+      })
+      .catch(err => {
+        console.warn('[Subtitles] Failed to fetch or parse VTT subtitles:', err);
+        setParsedCues([]);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [currentSubtitleUrl, selectedSubtitle]);
+
+  // Frame-accurate subtitle synchronizer during active playback (RAF loop)
+  useEffect(() => {
+    if (!selectedSubtitle || !isPlaying) return;
+    let rafId;
+    const tick = () => {
+      const v = videoRef.current;
+      if (v && !v.paused) {
+        const strategy = streamStrategyRef.current;
+        const isTranscoding = strategy?.mode === 'transcode' || strategy?.mode === 'remux';
+        const effectivePos = isTranscoding && seekOffsetRef.current > 0
+          ? seekOffsetRef.current + v.currentTime
+          : v.currentTime;
+        const adjustedTime = effectivePos + (subtitleOffsetRef.current || 0);
+        const text = getActiveCuesText(parsedCuesRef.current, adjustedTime);
+        if (text !== activeCueTextRef.current) {
+          activeCueTextRef.current = text;
+          setActiveCueText(text);
+        }
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, [selectedSubtitle, isPlaying, subtitleOffset]);
+
+  // Synchronize and force HTML5 video textTracks to showing whenever subtitle changes
+  useEffect(() => {
+    const vid = videoRef.current;
+    if (!vid) return;
+
+    const syncTracks = () => {
+      if (!vid.textTracks) return;
+      for (let i = 0; i < vid.textTracks.length; i++) {
+        const t = vid.textTracks[i];
+        if (selectedSubtitle && currentSubtitleUrl) {
+          t.mode = 'hidden';
+        } else {
+          t.mode = 'disabled';
+        }
+      }
+    };
+
+    syncTracks();
+    const t1 = setTimeout(syncTracks, 150);
+    const t2 = setTimeout(syncTracks, 500);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [selectedSubtitle, currentSubtitleUrl]);
+
+  // Intro / Outro Skip detection state (chapter-aware, driven by refs inside timeupdate)
+  const [skipMarker, setSkipMarker] = useState(null); // { type: 'intro' | 'outro', target, chapter }
+  const skipMarkerRef = useRef(null);
+  const skipMarkerKeyRef = useRef(null);
+  const dismissedMarkerKeyRef = useRef(null);
+  const chaptersRef = useRef([]);
+
+  // Chapters are probed server-side (-show_chapters) and returned by /api/stream/info
+
+  // Touch Gestures state
+  const touchStartRef = useRef(null);
+  const touchSeekRef = useRef(null); // pending seek target for horizontal swipes
+  const [touchIndicator, setTouchIndicator] = useState(null); // { type: 'volume' | 'brightness' | 'seek', value: number, text: string }
+  const touchIndicatorTimerRef = useRef(null);
+
+  const videoQueue = usePlayerStore(s => s.videoQueue);
+  const videoQueueIndex = usePlayerStore(s => s.videoQueueIndex);
+  const setVideoQueueIndex = usePlayerStore(s => s.setVideoQueueIndex);
+  const clearVideoQueue = usePlayerStore(s => s.clearVideoQueue);
+  const getNextVideo = usePlayerStore(s => s.getNextVideo);
+  const getPrevVideo = usePlayerStore(s => s.getPrevVideo);
+  const stopMusicForVideo = usePlayerStore(s => s.stopMusicForVideo);
+  const removeVideoFromQueue = usePlayerStore(s => s.removeVideoFromQueue);
+  const shuffleVideoQueue = usePlayerStore(s => s.shuffleVideoQueue);
 
   const isCurrentInQueue = Boolean(
     videoQueue &&
@@ -243,6 +771,17 @@ export default function Player() {
     String(videoQueue[videoQueueIndex]?.id) === String(id) &&
     getItemType(videoQueue[videoQueueIndex]) === type
   );
+
+  const isCurrentInQueueRef = useRef(isCurrentInQueue);
+  useEffect(() => { isCurrentInQueueRef.current = isCurrentInQueue; }, [isCurrentInQueue]);
+
+  const nextUpRef = useRef(nextUp);
+  useEffect(() => { nextUpRef.current = nextUp; }, [nextUp]);
+
+  const isTransitioningRef = useRef(false);
+  useEffect(() => {
+    isTransitioningRef.current = false;
+  }, [id, type]);
 
   // Sync videoQueueIndex with the current route id, or clear stale queue if media does not belong to it
   useEffect(() => {
@@ -314,18 +853,21 @@ export default function Player() {
   }, [returnToLibraryHome]);
 
   const handleNextVideo = useCallback(() => {
+    if (isTransitioningRef.current) return;
+
     const nextVid = isCurrentInQueue ? getNextVideo() : null;
     if (nextVid) {
-      advanceToNextVideo();
+      isTransitioningRef.current = true;
       const targetType = getItemType(nextVid, type);
       navigate(`/watch/${targetType}/${nextVid.id}`, { replace: true });
     } else if (nextUp && nextUp.id) {
+      isTransitioningRef.current = true;
       const targetType = getItemType(nextUp, type);
       navigate(`/watch/${targetType}/${nextUp.id}`, { replace: true });
     } else {
       returnToLibraryHomeRef.current?.();
     }
-  }, [getNextVideo, advanceToNextVideo, navigate, nextUp, type, isCurrentInQueue]);
+  }, [getNextVideo, navigate, nextUp, type, isCurrentInQueue]);
 
   const handleNextVideoRef = useRef(handleNextVideo);
   useEffect(() => { handleNextVideoRef.current = handleNextVideo; }, [handleNextVideo]);
@@ -333,13 +875,15 @@ export default function Player() {
   useEffect(() => { autoPlayNextRef.current = autoPlayNext; }, [autoPlayNext]);
 
   const handlePrevVideo = useCallback(() => {
+    if (isTransitioningRef.current) return;
+
     const prevVid = isCurrentInQueue ? getPrevVideo() : null;
     if (prevVid) {
-      advanceToPrevVideo();
+      isTransitioningRef.current = true;
       const targetType = getItemType(prevVid, type);
       navigate(`/watch/${targetType}/${prevVid.id}`, { replace: true });
     }
-  }, [getPrevVideo, advanceToPrevVideo, navigate, type, isCurrentInQueue]);
+  }, [getPrevVideo, navigate, type, isCurrentInQueue]);
 
   const buildStreamUrl = useCallback((params = {}) => {
     const token = getAuthToken();
@@ -398,13 +942,329 @@ export default function Player() {
     });
   }, [isRtl, showFeedbackBadge]);
 
+  const setAudioMode = useCallback((mode) => {
+    initAudioContext();
+    setAudioEnhanceMode(mode);
+    try { localStorage.setItem('arn_player_audio_enhance', mode); } catch {}
+
+    const ctx = audioCtxRef.current;
+    const filter = dialogueFilterRef.current;
+    const comp = compressorRef.current;
+
+    if (ctx && filter && comp) {
+      if (mode === 'dialogue') {
+        filter.gain.setTargetAtTime(6.0, ctx.currentTime, 0.05);
+        comp.threshold.setTargetAtTime(-18, ctx.currentTime, 0.05);
+        showFeedbackBadge(isRtl ? 'تم تفعيل تعزيز الحوار 🗣️' : 'Dialogue Boost Active 🗣️', Headphones);
+      } else if (mode === 'night') {
+        filter.gain.setTargetAtTime(3.5, ctx.currentTime, 0.05);
+        comp.threshold.setTargetAtTime(-32, ctx.currentTime, 0.05);
+        showFeedbackBadge(isRtl ? 'تم تفعيل الوضع الليلي 🌙' : 'Night Mode Active 🌙', Moon);
+      } else {
+        filter.gain.setTargetAtTime(0, ctx.currentTime, 0.05);
+        comp.threshold.setTargetAtTime(-12, ctx.currentTime, 0.05);
+        showFeedbackBadge(isRtl ? 'وضع الصوت الافتراضي' : 'Normal Audio Mode', Volume2);
+      }
+    }
+    setShowAudioEnhanceMenu(false);
+  }, [initAudioContext, isRtl, showFeedbackBadge]);
+
+  const setSleepTimerOption = useCallback((option) => {
+    if (sleepTimerIntervalRef.current) {
+      clearInterval(sleepTimerIntervalRef.current);
+      sleepTimerIntervalRef.current = null;
+    }
+
+    if (option === 'off' || !option) {
+      setSleepTimer(null);
+      setSleepTimeRemaining(0);
+      showFeedbackBadge(isRtl ? 'تم إلغاء مؤقت النوم' : 'Sleep Timer Disabled', Clock);
+      setShowSleepMenu(false);
+      return;
+    }
+
+    if (option === 'end_of_episode') {
+      const rem = durationRef.current > currentTimeRef.current ? (durationRef.current - currentTimeRef.current) : 1800;
+      setSleepTimer({ mode: 'end_of_episode', targetTime: Date.now() + (rem * 1000) });
+      setSleepTimeRemaining(Math.round(rem));
+      showFeedbackBadge(isRtl ? 'إيقاف عند نهاية العمل 🎬' : 'Sleep at End of Video 🎬', Moon);
+    } else {
+      const minutes = parseInt(option, 10);
+      const ms = minutes * 60 * 1000;
+      setSleepTimer({ mode: option, targetTime: Date.now() + ms });
+      setSleepTimeRemaining(minutes * 60);
+      showFeedbackBadge(isRtl ? `مؤقت النوم: ${minutes} دقيقة 🌙` : `Sleep in ${minutes}m 🌙`, Moon);
+    }
+    setShowSleepMenu(false);
+  }, [isRtl, showFeedbackBadge]);
+
+  useEffect(() => {
+    if (!sleepTimer) return;
+
+    sleepTimerIntervalRef.current = setInterval(() => {
+      const remainingSec = Math.max(0, Math.round((sleepTimer.targetTime - Date.now()) / 1000));
+      setSleepTimeRemaining(remainingSec);
+
+      if (remainingSec <= 20 && remainingSec > 0 && masterGainRef.current && audioCtxRef.current) {
+        const targetGain = Math.max(0.05, remainingSec / 20);
+        masterGainRef.current.gain.setTargetAtTime(targetGain, audioCtxRef.current.currentTime, 0.2);
+      }
+
+      if (remainingSec <= 0) {
+        clearInterval(sleepTimerIntervalRef.current);
+        setSleepTimer(null);
+        if (videoRef.current) {
+          videoRef.current.pause();
+          setIsPlaying(false);
+        }
+        showFeedbackBadge(isRtl ? 'تم إيقاف التشغيل بواسطة مؤقت النوم 🌙' : 'Playback stopped by Sleep Timer 🌙', Moon);
+      }
+    }, 1000);
+
+    return () => {
+      if (sleepTimerIntervalRef.current) clearInterval(sleepTimerIntervalRef.current);
+    };
+  }, [sleepTimer, isRtl, showFeedbackBadge]);
+
+  // ARN SyncPlay WebSocket Connection Effect
+  useEffect(() => {
+    if (!syncRoomId) {
+      if (syncWsRef.current) {
+        syncWsRef.current.close();
+        syncWsRef.current = null;
+      }
+      return;
+    }
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    // If running in dev on 5173, point directly to backend port 8096, else use current host
+    const wsHost = window.location.port === '5173'
+      ? `${window.location.hostname}:8096`
+      : window.location.host;
+
+    const uId = authUser?.id || `anon-${Date.now()}`;
+    const devId = deviceId || `dev-${Math.random().toString(36).substring(2, 8)}`;
+    const connId = tabSessionIdRef.current;
+    const uName = encodeURIComponent(authUser?.display_name || authUser?.username || 'ضيف ARN');
+    const uAvatar = authUser?.avatar ? encodeURIComponent(authUser.avatar) : '';
+
+    const wsUrl = `${protocol}//${wsHost}/ws/syncplay?roomId=${syncRoomId}&userId=${uId}&deviceId=${devId}&connectionId=${connId}&username=${uName}&avatar=${uAvatar}`;
+    console.log('[SyncPlay] Connecting to:', wsUrl);
+    const ws = new WebSocket(wsUrl);
+    syncWsRef.current = ws;
+
+    ws.onopen = () => {
+      console.log('[SyncPlay] Connected to room:', syncRoomId);
+      showFeedbackBadge(isRtl ? `متصل بالغرفة: ${syncRoomId}` : `Connected to: ${syncRoomId}`, Users);
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        switch (msg.type) {
+          case 'INIT_ROOM_STATE': {
+            if (msg.connectionId) {
+              myConnectionIdRef.current = msg.connectionId;
+            }
+            setSyncIsHost(Boolean(msg.isHost));
+            setSyncMembers(msg.members || []);
+            if (msg.recentMessages) setSyncMessages(msg.recentMessages);
+
+            if (msg.playbackState && typeof msg.playbackState.currentTime === 'number') {
+              isApplyingRemoteSyncRef.current = true;
+              if (videoRef.current) {
+                videoRef.current.currentTime = msg.playbackState.currentTime;
+                if (msg.playbackState.isPlaying) {
+                  videoRef.current.play().catch(() => {});
+                  setIsPlaying(true);
+                } else {
+                  videoRef.current.pause();
+                  setIsPlaying(false);
+                }
+              }
+              setTimeout(() => { isApplyingRemoteSyncRef.current = false; }, 800);
+            }
+            break;
+          }
+
+          case 'MEMBER_JOINED': {
+            setSyncMembers(msg.members || []);
+            if (msg.user?.username) {
+              showFeedbackBadge(isRtl ? `انضم ${msg.user.username} للمشاهدة 🎉` : `${msg.user.username} joined 🎉`, Users);
+            }
+            break;
+          }
+
+          case 'MEMBER_LEFT': {
+            setSyncMembers(msg.members || []);
+            break;
+          }
+
+          case 'HOST_CHANGED': {
+            const isMe = (msg.newHostConnectionId && (msg.newHostConnectionId === myConnectionIdRef.current || msg.newHostConnectionId === connId))
+              || (msg.newHostDeviceId === devId && !msg.newHostConnectionId);
+            if (isMe) {
+              setSyncIsHost(true);
+              showFeedbackBadge(isRtl ? 'أصبحت أنت المضيف (Host) للغرفة 👑' : 'You are now Host 👑', Users);
+            }
+            break;
+          }
+
+          case 'SYNC_PLAY': {
+            isApplyingRemoteSyncRef.current = true;
+            if (videoRef.current) {
+              if (typeof msg.currentTime === 'number' && Math.abs(videoRef.current.currentTime - msg.currentTime) > 1.2) {
+                videoRef.current.currentTime = msg.currentTime;
+              }
+              videoRef.current.play().catch(() => {});
+              setIsPlaying(true);
+            }
+            setTimeout(() => { isApplyingRemoteSyncRef.current = false; }, 600);
+            break;
+          }
+
+          case 'SYNC_PAUSE': {
+            isApplyingRemoteSyncRef.current = true;
+            if (videoRef.current) {
+              if (typeof msg.currentTime === 'number' && Math.abs(videoRef.current.currentTime - msg.currentTime) > 1.2) {
+                videoRef.current.currentTime = msg.currentTime;
+              }
+              videoRef.current.pause();
+              setIsPlaying(false);
+            }
+            setTimeout(() => { isApplyingRemoteSyncRef.current = false; }, 600);
+            break;
+          }
+
+          case 'SYNC_SEEK': {
+            isApplyingRemoteSyncRef.current = true;
+            if (videoRef.current && typeof msg.currentTime === 'number') {
+              videoRef.current.currentTime = msg.currentTime;
+              if (msg.isPlaying) videoRef.current.play().catch(() => {});
+              else videoRef.current.pause();
+            }
+            setTimeout(() => { isApplyingRemoteSyncRef.current = false; }, 600);
+            break;
+          }
+
+          case 'SYNC_HEARTBEAT': {
+            if (!syncIsHost && videoRef.current && typeof msg.currentTime === 'number') {
+              const drift = Math.abs(videoRef.current.currentTime - msg.currentTime);
+              if (drift > 2.0) {
+                videoRef.current.currentTime = msg.currentTime;
+              }
+            }
+            break;
+          }
+
+          case 'NEW_CHAT_MESSAGE': {
+            if (msg.message) {
+              setSyncMessages(prev => [...prev.slice(-49), msg.message]);
+            }
+            break;
+          }
+
+          case 'EMOJI_BURST': {
+            const newEmoji = {
+              id: 'emoji-' + Date.now() + '-' + Math.random(),
+              emoji: msg.emoji,
+              left: Math.floor(Math.random() * 40) + 50,
+              duration: 2.2 + Math.random() * 0.8
+            };
+            setFloatingEmojis(prev => [...prev.slice(-12), newEmoji]);
+            setTimeout(() => {
+              setFloatingEmojis(prev => prev.filter(e => e.id !== newEmoji.id));
+            }, 3000);
+            break;
+          }
+
+          default:
+            break;
+        }
+      } catch (e) {
+        console.warn('[SyncPlay ws parse error]:', e);
+      }
+    };
+
+    ws.onclose = () => {
+      console.log('[SyncPlay] WebSocket closed');
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, [syncRoomId, authUser, deviceId, isRtl, showFeedbackBadge]);
+
+  const sendSyncPlayEvent = useCallback((eventType, data = {}) => {
+    if (!syncWsRef.current || syncWsRef.current.readyState !== WebSocket.OPEN) return;
+    if (isApplyingRemoteSyncRef.current) return;
+
+    syncWsRef.current.send(JSON.stringify({
+      type: eventType,
+      currentTime: videoRef.current ? videoRef.current.currentTime : currentTimeRef.current,
+      isPlaying: videoRef.current ? !videoRef.current.paused : false,
+      speed: playbackSpeed,
+      ...data
+    }));
+  }, [playbackSpeed]);
+
+  // Host Heartbeat
+  useEffect(() => {
+    if (!syncRoomId || !syncIsHost) return;
+    const hbInterval = setInterval(() => {
+      sendSyncPlayEvent('HEARTBEAT');
+    }, 4000);
+    return () => clearInterval(hbInterval);
+  }, [syncRoomId, syncIsHost, sendSyncPlayEvent]);
+
+  // Ambient Canvas animation loop
+  useEffect(() => {
+    if (!ambientMode) return;
+    const canvas = ambientCanvasRef.current;
+    const video = videoRef.current;
+    if (!canvas || !video) return;
+
+    const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: false });
+    let animId = null;
+    let isRunning = true;
+
+    const renderFrame = () => {
+      if (!isRunning) return;
+      if (video && !video.paused && !video.ended && video.readyState >= 2) {
+        try {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        } catch (e) {}
+      }
+      if ('requestVideoFrameCallback' in video) {
+        video.requestVideoFrameCallback(renderFrame);
+      } else {
+        animId = requestAnimationFrame(renderFrame);
+      }
+    };
+
+    if ('requestVideoFrameCallback' in video) {
+      video.requestVideoFrameCallback(renderFrame);
+    } else {
+      animId = requestAnimationFrame(renderFrame);
+    }
+
+    return () => {
+      isRunning = false;
+      if (animId) cancelAnimationFrame(animId);
+    };
+  }, [ambientMode, isPlaying]);
+
   // Synchronous play/pause toggle preserving user activation
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
+    initAudioContext();
     if (video.paused) {
       video.play().then(() => {
         setIsPlaying(true);
+        if (!isApplyingRemoteSyncRef.current && syncRoomId) {
+          sendSyncPlayEvent('PLAY', { currentTime: video.currentTime });
+        }
         showFeedbackBadge(isRtl ? 'تشغيل' : 'Play', 'play');
       }).catch((err) => {
         console.warn('Playback failed:', err);
@@ -412,10 +1272,14 @@ export default function Player() {
     } else {
       video.pause();
       setIsPlaying(false);
+      if (!isApplyingRemoteSyncRef.current && syncRoomId) {
+        sendSyncPlayEvent('PAUSE', { currentTime: video.currentTime });
+      }
+      saveCurrentPlaybackRef.current?.();
       showFeedbackBadge(isRtl ? 'إيقاف مؤقت' : 'Pause', 'pause');
     }
     resetHideTimer();
-  }, [isRtl, showFeedbackBadge, resetHideTimer]);
+  }, [isRtl, showFeedbackBadge, resetHideTimer, initAudioContext, syncRoomId, sendSyncPlayEvent]);
 
   const performSeek = useCallback((targetSeconds) => {
     const total = durationRef.current || duration || 0;
@@ -438,7 +1302,11 @@ export default function Player() {
         setCurrentTime(target);
       }
     }
-  }, [duration, type, id]);
+
+    if (!isApplyingRemoteSyncRef.current && syncRoomId) {
+      sendSyncPlayEvent('SEEK', { currentTime: target });
+    }
+  }, [duration, type, id, syncRoomId, sendSyncPlayEvent]);
 
   const performSeekRef = useRef(performSeek);
   useEffect(() => { performSeekRef.current = performSeek; }, [performSeek]);
@@ -462,6 +1330,7 @@ export default function Player() {
     setCurrentTime(0);
     nextUpTriggered.current = false;
     setNextUp(null);
+    chaptersRef.current = [];
 
     // Fetch stream strategy info (direct vs remux vs transcode)
     authFetch(`/api/stream/info/${type}/${id}`)
@@ -474,8 +1343,17 @@ export default function Player() {
           if (d.data.probe?.duration) {
             updateDuration(d.data.probe.duration);
           }
+          if (Array.isArray(d.data.probe?.chapters)) {
+            chaptersRef.current = d.data.probe.chapters;
+          }
           if (d.data.subtitles && Array.isArray(d.data.subtitles)) {
-            setAvailableSubtitles(d.data.subtitles);
+            setAvailableSubtitles(d.data.subtitles.map((s, idx) => ({
+              ...s,
+              id: s.id || (s.isEmbedded ? `embedded_sub_${s.trackIndex ?? s.index ?? idx}` : `stream_sub_${idx}`),
+              streamIndex: s.streamIndex ?? s.index,
+              mediaType: type,
+              mediaId: id
+            })));
           }
           if (d.data.audioTracks && Array.isArray(d.data.audioTracks)) {
             setAvailableAudioTracks(d.data.audioTracks);
@@ -490,13 +1368,14 @@ export default function Player() {
       .then(subRes => {
         if (subRes.data && Array.isArray(subRes.data) && subRes.data.length > 0) {
           setAvailableSubtitles(prev => {
-            const existingPaths = new Set(prev.map(p => p.path));
+            const existingPaths = new Set(prev.map(p => p.path).filter(Boolean));
+            const existingIds = new Set(prev.map(p => p.id).filter(Boolean));
             const newSubs = subRes.data
-              .filter(s => !existingPaths.has(s.path))
+              .filter(s => (!s.path || !existingPaths.has(s.path)) && (!s.id || !existingIds.has(s.id)))
               .map((s, idx) => ({
-                id: `local_sub_${idx}`,
+                id: s.id || `local_sub_${idx}`,
                 language: s.language || 'ar',
-                title: s.filename,
+                title: s.filename || s.title,
                 path: s.path,
                 format: s.format,
                 isLocal: true
@@ -602,7 +1481,17 @@ export default function Player() {
   }, [type, id, mediaInfo, searchParams, navigate, initialTimeParam]);
 
   const nextUpTriggered = useRef(false);
-  useEffect(() => { nextUpTriggered.current = false; }, [id]);
+  useEffect(() => {
+    nextUpTriggered.current = false;
+    upNextCancelledRef.current = false;
+    setNextUp(null);
+    setCountdown(null);
+    chaptersRef.current = [];
+    skipMarkerRef.current = null;
+    skipMarkerKeyRef.current = null;
+    dismissedMarkerKeyRef.current = null;
+    setSkipMarker(null);
+  }, [id, type]);
 
   // Video initialization & events
   useEffect(() => {
@@ -627,7 +1516,7 @@ export default function Player() {
       }
 
       const totalDur = durationRef.current || duration || 0;
-      const threshold = upNextTimeRef.current || 10;
+      const threshold = upNextTimeRef.current || UP_NEXT_WINDOW;
 
       // Only trigger Up Next when:
       // 1. Media is an episode OR a movie with a next item in the playlist
@@ -645,7 +1534,8 @@ export default function Player() {
       ) {
         if (!nextUpTriggered.current) {
           nextUpTriggered.current = true;
-          setCountdown(threshold);
+          upNextCancelledRef.current = false;
+          setCountdown(null);
           const nextVid = isCurrentInQueue ? getNextVideo() : null;
           if (nextVid) {
             setNextUp({
@@ -676,13 +1566,62 @@ export default function Player() {
       } else if (nextUpTriggered.current && totalDur > 0 && effectivePos < totalDur - threshold - 3) {
         // If user sought backwards away from the end, dismiss next-up
         nextUpTriggered.current = false;
+        upNextCancelledRef.current = false;
         setNextUp(null);
+      }
+
+      // Chapter-aware Intro / Outro skip detection
+      const marker = detectSkipMarker(effectivePos, totalDur, chaptersRef.current, type === 'episode');
+      const markerKey = marker ? `${marker.type}:${Math.round(marker.target)}` : null;
+
+      if (markerKey !== skipMarkerKeyRef.current) {
+        skipMarkerKeyRef.current = markerKey;
+        dismissedMarkerKeyRef.current = null;
+      }
+
+      const isDismissed = !!markerKey && dismissedMarkerKeyRef.current === markerKey;
+      const shouldShow = !!marker && !isDismissed;
+      const currentMarker = skipMarkerRef.current;
+
+      if (shouldShow) {
+        if (!currentMarker || currentMarker.type !== marker.type || Math.abs((currentMarker.target || 0) - marker.target) > 1) {
+          skipMarkerRef.current = marker;
+          setSkipMarker(marker);
+        }
+      } else if (currentMarker) {
+        skipMarkerRef.current = null;
+        setSkipMarker(null);
+      }
+
+      // Real-time subtitle cue update for video scrubbing and paused frame sync
+      if (selectedSubtitleRef.current) {
+        const adjustedTime = effectivePos + (subtitleOffsetRef.current || 0);
+        const activeText = getActiveCuesText(parsedCuesRef.current, adjustedTime);
+        if (activeText !== activeCueTextRef.current) {
+          activeCueTextRef.current = activeText;
+          setActiveCueText(activeText);
+        }
+      } else if (activeCueTextRef.current) {
+        activeCueTextRef.current = '';
+        setActiveCueText('');
       }
     };
 
     const onPlay = () => setIsPlaying(true);
-    const onPause = () => setIsPlaying(false);
+    const onPause = () => {
+      setIsPlaying(false);
+      saveCurrentPlaybackRef.current?.();
+    };
     const onEnded = async () => {
+      if (isTransitioningRef.current) return;
+
+      // The user dismissed the "Up Next" card: never continue to the next episode
+      if (upNextCancelledRef.current) {
+        upNextCancelledRef.current = false;
+        returnToLibraryHomeRef.current?.();
+        return;
+      }
+
       if (type === 'episode') {
         try {
           const watched = JSON.parse(localStorage.getItem('arn_watched_episodes') || '[]');
@@ -694,7 +1633,7 @@ export default function Player() {
       }
 
       // Check if there is an active next video in the queue
-      const nextVid = isCurrentInQueue ? getNextVideo() : null;
+      const nextVid = isCurrentInQueueRef.current ? getNextVideo() : null;
       if (nextVid) {
         if (autoPlayNextRef.current) {
           handleNextVideoRef.current?.();
@@ -703,7 +1642,8 @@ export default function Player() {
       }
 
       // Check if nextUp episode/video was pre-fetched
-      if (nextUp && nextUp.id) {
+      const curNextUp = nextUpRef.current;
+      if (curNextUp && curNextUp.id) {
         if (autoPlayNextRef.current) {
           handleNextVideoRef.current?.();
         }
@@ -716,7 +1656,8 @@ export default function Player() {
           const res = await authFetch(`/api/series/episodes/${id}/next-up`);
           const j = await res.json();
           if (j?.data?.id) {
-            if (autoPlayNextRef.current) {
+            if (autoPlayNextRef.current && !isTransitioningRef.current) {
+              isTransitioningRef.current = true;
               const targetType = getItemType(j.data, 'episode');
               navigate(`/watch/${targetType}/${j.data.id}`, { replace: true });
             }
@@ -1024,52 +1965,132 @@ export default function Player() {
     return () => document.removeEventListener('fullscreenchange', onFsChange);
   }, []);
 
-  // Save playback progress every 5 seconds
+  const saveCurrentPlayback = useCallback((overridePos = null) => {
+    const v = videoRef.current;
+    const totalDur = durationRef.current || duration || (v ? v.duration : 0);
+    if (!totalDur || isNaN(totalDur) || totalDur <= 0) return;
+
+    let effectivePos;
+    if (typeof overridePos === 'number') {
+      effectivePos = Math.round(overridePos);
+    } else if (v) {
+      const strategy = streamStrategyRef.current;
+      const isTranscoding = strategy?.mode === 'transcode' || strategy?.mode === 'remux';
+      effectivePos = isTranscoding && seekOffsetRef.current > 0
+        ? Math.round(seekOffsetRef.current + v.currentTime)
+        : Math.round(v.currentTime);
+    } else {
+      effectivePos = Math.round(currentTimeRef.current || 0);
+    }
+
+    if (effectivePos < 0) effectivePos = 0;
+
+    savePlayback({
+      media_type: type,
+      media_id: Number(id),
+      position: effectivePos,
+      duration: Math.round(totalDur)
+    }).then(() => {
+      queryClient.invalidateQueries({ queryKey: ['landing'] });
+      queryClient.invalidateQueries({ queryKey: ['movies-home'] });
+      queryClient.invalidateQueries({ queryKey: ['continue'] });
+    }).catch(() => {});
+
+    if (type === 'episode' && totalDur > 0 && effectivePos / totalDur >= 0.8) {
+      try {
+        const watched = JSON.parse(localStorage.getItem('arn_watched_episodes') || '[]');
+        if (!watched.includes(Number(id))) {
+          watched.push(Number(id));
+          localStorage.setItem('arn_watched_episodes', JSON.stringify(watched));
+        }
+      } catch {}
+    }
+  }, [type, id, duration, queryClient]);
+
+  const saveCurrentPlaybackRef = useRef(saveCurrentPlayback);
+  useEffect(() => {
+    saveCurrentPlaybackRef.current = saveCurrentPlayback;
+  }, [saveCurrentPlayback]);
+
+  // Save playback progress every 5 seconds, and on unmount
   useEffect(() => {
     const interval = setInterval(() => {
       const v = videoRef.current;
+      if (v && !v.paused) {
+        saveCurrentPlaybackRef.current?.();
+      }
+    }, 5000);
+    return () => {
+      clearInterval(interval);
+      saveCurrentPlaybackRef.current?.();
+    };
+  }, []);
+
+  // Save playback on window close / page hide (beacon fallback)
+  useEffect(() => {
+    const onLeave = () => {
+      const v = videoRef.current;
       const totalDur = durationRef.current || duration || (v ? v.duration : 0);
-      if (v && !v.paused && totalDur > 0) {
+      if (totalDur > 0 && v) {
         const strategy = streamStrategyRef.current;
         const isTranscoding = strategy?.mode === 'transcode' || strategy?.mode === 'remux';
         const effectivePos = isTranscoding && seekOffsetRef.current > 0
           ? Math.round(seekOffsetRef.current + v.currentTime)
           : Math.round(v.currentTime);
-
-        savePlayback({
+        const token = getAuthToken();
+        const payload = JSON.stringify({
           media_type: type,
           media_id: Number(id),
           position: effectivePos,
           duration: Math.round(totalDur)
-        }).catch(() => {});
-
-        if (type === 'episode' && totalDur > 0 && effectivePos / totalDur >= 0.8) {
-          try {
-            const watched = JSON.parse(localStorage.getItem('arn_watched_episodes') || '[]');
-            if (!watched.includes(Number(id))) {
-              watched.push(Number(id));
-              localStorage.setItem('arn_watched_episodes', JSON.stringify(watched));
-            }
-          } catch {}
+        });
+        if (navigator.sendBeacon) {
+          const blob = new Blob([payload], { type: 'application/json' });
+          navigator.sendBeacon(`/api/playback?token=${encodeURIComponent(token)}`, blob);
         }
       }
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [id, type, duration]);
+    };
+    window.addEventListener('beforeunload', onLeave);
+    window.addEventListener('pagehide', onLeave);
+    return () => {
+      window.removeEventListener('beforeunload', onLeave);
+      window.removeEventListener('pagehide', onLeave);
+    };
+  }, [type, id, duration]);
 
-  // Next up countdown
+  // Up Next live countdown: the card shows the remaining time, and the final
+  // UP_NEXT_COUNTDOWN seconds are highlighted before auto-playing the next item.
   useEffect(() => {
-    if (!nextUp) return;
-    const iv = setInterval(() => setCountdown(c => (c > 0 ? c - 1 : 0)), 1000);
-    if (countdown === 0) {
-      setNextUp(null);
-      setCountdown(upNextTime);
-      if (autoPlayNext) {
-        handleNextVideo();
-      }
+    if (!nextUp) {
+      setCountdown(null);
+      return;
     }
+
+    let fired = false;
+    const tick = () => {
+      const total = durationRef.current || 0;
+      if (total <= 0) return;
+      const remaining = total - currentTimeRef.current;
+
+      if (remaining <= 0.2) {
+        if (fired) return;
+        fired = true;
+        setCountdown(0);
+        setNextUp(null);
+        if (autoPlayNextRef.current && !isTransitioningRef.current) {
+          handleNextVideoRef.current?.();
+        }
+        return;
+      }
+
+      const value = Math.min(999, Math.ceil(remaining));
+      setCountdown(prev => (prev === value ? prev : value));
+    };
+
+    tick();
+    const iv = setInterval(tick, 250);
     return () => clearInterval(iv);
-  }, [nextUp, countdown, handleNextVideo, autoPlayNext, upNextTime]);
+  }, [nextUp]);
 
   // Pause hide timer whenever menus or playlist drawer open
   useEffect(() => {
@@ -1108,13 +2129,18 @@ export default function Player() {
     const pos = Math.max(0, Math.min(1, offsetX / rect.width));
     setHoverPosition(pos * 100);
     setHoverTime(pos * duration);
+    // Thumbnail preview: quantize to 10s buckets server-side so rapid moves reuse the same frame
+    if (duration > 0) {
+      setHoverThumbUrl(`/api/stream/thumb/${type}/${id}?t=${Math.floor(pos * duration)}`);
+    }
   };
 
   const handleProgressMouseLeave = () => {
     setHoverTime(null);
+    setHoverThumbUrl(null);
   };
 
-  const handleVolumeChange = (newVol) => {
+  const handleVolumeChange = (newVol, persist = true) => {
     const v = Math.max(0, Math.min(1, newVol));
     setVolume(v);
     setIsMuted(v === 0);
@@ -1124,7 +2150,9 @@ export default function Player() {
       videoRef.current.volume = v;
       videoRef.current.muted = v === 0;
     }
-    saveVolumeSettings({ volume: v, muted: v === 0 }).catch(() => {});
+    if (persist) {
+      saveVolumeSettings({ volume: v, muted: v === 0 }).catch(() => {});
+    }
     resetHideTimer();
   };
 
@@ -1347,17 +2375,107 @@ export default function Player() {
     sharpnessVal !== 0
   );
 
+  // Touch gesture handlers for mobile/tablet screens
+  const handleTouchStart = (e) => {
+    if (e.target.closest('button, input, select, a, [role="button"]')) return;
+    if (e.touches.length !== 1) return;
+    const t = e.touches[0];
+    const width = window.innerWidth;
+    const isRightSide = t.clientX > width / 2;
+    touchSeekRef.current = null;
+    touchStartRef.current = {
+      startX: t.clientX,
+      startY: t.clientY,
+      isRightSide,
+      startVolume: volume,
+      startBrightness: visualSettings.brightness || 100,
+      startTime: currentTimeRef.current,
+      moved: false
+    };
+  };
+
+  const handleTouchMove = (e) => {
+    if (!touchStartRef.current || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    const dx = t.clientX - touchStartRef.current.startX;
+    const dy = touchStartRef.current.startY - t.clientY; // upwards is positive
+
+    if (Math.abs(dx) > 15 || Math.abs(dy) > 15) {
+      touchStartRef.current.moved = true;
+    }
+
+    if (!touchStartRef.current.moved) return;
+
+    // Vertical drag: Volume (Right side) or Brightness (Left side)
+    if (Math.abs(dy) > Math.abs(dx)) {
+      const deltaPercent = (dy / (window.innerHeight * 0.4)) * 100;
+      if (touchStartRef.current.isRightSide) {
+        // Adjust Volume (persisted once at gesture end to avoid spamming the API)
+        const newVol = Math.min(1, Math.max(0, touchStartRef.current.startVolume + (dy / (window.innerHeight * 0.4))));
+        handleVolumeChange(newVol, false);
+        setTouchIndicator({
+          type: 'volume',
+          value: newVol * 100,
+          text: isRtl ? 'مستوى الصوت' : 'Volume'
+        });
+      } else {
+        // Adjust Brightness
+        const newBri = Math.min(200, Math.max(50, Math.round(touchStartRef.current.startBrightness + deltaPercent)));
+        updateVisualSetting('brightness', newBri);
+        setTouchIndicator({
+          type: 'brightness',
+          value: newBri,
+          text: isRtl ? 'إضاءة الشاشة' : 'Brightness'
+        });
+      }
+    } else {
+      // Horizontal drag: Fast seek preview
+      const deltaSec = Math.round((dx / window.innerWidth) * 60);
+      const targetSec = Math.min(durationRef.current || 1000, Math.max(0, touchStartRef.current.startTime + deltaSec));
+      touchSeekRef.current = targetSec;
+      setTouchIndicator({
+        type: 'seek',
+        text: `${deltaSec >= 0 ? '+' : ''}${deltaSec}s (${formatTime(targetSec)})`
+      });
+    }
+
+    if (touchIndicatorTimerRef.current) clearTimeout(touchIndicatorTimerRef.current);
+  };
+
+  const handleTouchEnd = () => {
+    const start = touchStartRef.current;
+    if (start?.moved) {
+      if (touchSeekRef.current !== null) {
+        performSeek(touchSeekRef.current);
+      } else if (start.isRightSide) {
+        // Commit the volume once when the gesture finishes
+        const v = videoRef.current ? videoRef.current.volume : volume;
+        saveVolumeSettings({ volume: v, muted: v === 0 }).catch(() => {});
+      }
+    }
+    touchStartRef.current = null;
+    touchSeekRef.current = null;
+    if (touchIndicatorTimerRef.current) clearTimeout(touchIndicatorTimerRef.current);
+    touchIndicatorTimerRef.current = setTimeout(() => {
+      setTouchIndicator(null);
+    }, 800);
+  };
+
   return (
     <div
       ref={containerRef}
       className={`relative w-screen h-screen bg-black overflow-hidden select-none flex items-center justify-center ${
         !showControls && isPlaying ? 'cursor-none' : ''
       }`}
+      style={{ overscrollBehavior: 'none' }}
       onMouseMove={resetHideTimer}
       onClick={handleContainerClick}
       onMouseDown={handleContainerMouseDown}
       onAuxClick={handleContainerAuxClick}
       onWheel={handleWheel}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
     >
       {/* SVG Convolution Filter for Video Sharpness (Edge-Preserving Detail Enhancement) */}
       <svg
@@ -1378,6 +2496,41 @@ export default function Player() {
         </defs>
       </svg>
 
+      {/* Dynamic Subtitle Style Injection */}
+      <style>{`
+        #arn-subtitle-text, #arn-subtitle-preview {
+          font-family: '${subtitleSettings.fontFamily || 'Cairo'}', 'Alexandria', 'Tajawal', 'Inter', system-ui, sans-serif !important;
+        }
+        ::cue {
+          display: none !important;
+          opacity: 0 !important;
+          visibility: hidden !important;
+          font-size: 0px !important;
+          line-height: 0 !important;
+          height: 0px !important;
+          width: 0px !important;
+          color: transparent !important;
+          background: transparent !important;
+        }
+      `}</style>
+
+      {/* Ambient Glow Mode Canvas — replicates cinematic projection behind the video */}
+      {ambientMode && (
+        <canvas
+          ref={ambientCanvasRef}
+          width={64}
+          height={36}
+          aria-hidden="true"
+          className="absolute inset-0 w-full h-full pointer-events-none transition-opacity duration-700"
+          style={{
+            filter: 'blur(55px) saturate(160%) brightness(1.15)',
+            transform: 'scale(1.14)',
+            opacity: isPlaying ? 0.85 : 0.35,
+            zIndex: 0
+          }}
+        />
+      )}
+
       {/* Video Element */}
       <video
         key={id}
@@ -1386,6 +2539,7 @@ export default function Player() {
         autoPlay
         playsInline
         crossOrigin="anonymous"
+        onPlay={initAudioContext}
         onError={() => setPlaybackError(true)}
         onLoadedMetadata={(e) => {
           e.currentTarget.volume = isMuted ? 0 : volume;
@@ -1403,16 +2557,53 @@ export default function Player() {
           filter: `${sharpnessVal > 0 ? 'url(#arn-video-sharpen) ' : ''}brightness(${visualSettings.brightness}%) contrast(${visualSettings.contrast}%) saturate(${visualSettings.saturation}%)`
         }}
       >
-        {selectedSubtitle?.path ? (
+        {currentSubtitleUrl ? (
           <track
+            key={`${selectedSubtitle?.id || selectedSubtitle?.path || selectedSubtitle?.streamIndex || selectedSubtitle?.index || 'sub'}_offset_${subtitleOffset}`}
             kind="subtitles"
-            src={`/api/subtitles/serve?path=${encodeURIComponent(selectedSubtitle.path)}${getAuthToken() ? `&token=${encodeURIComponent(getAuthToken())}` : ''}`}
-            srcLang={selectedSubtitle.language || 'ar'}
-            label={selectedSubtitle.title || 'العربية'}
+            src={currentSubtitleUrl}
+            srcLang={selectedSubtitle?.language || 'ar'}
+            label={selectedSubtitle?.title || 'العربية'}
             default
+            onLoad={(e) => {
+              try {
+                if (e?.target?.track) {
+                  e.target.track.mode = 'hidden';
+                }
+              } catch (err) {
+                console.warn('[Subtitles] Failed to set track mode:', err);
+              }
+            }}
           />
         ) : null}
       </video>
+
+
+
+      {/* Custom Subtitle Overlay Layer (Netflix/Jellyfin Architecture) */}
+      {activeCueText && selectedSubtitle && (
+        <div
+          id="arn-custom-subtitle-overlay"
+          className="absolute left-0 right-0 z-20 pointer-events-none flex justify-center px-4 sm:px-8 transition-all duration-150 select-none"
+          style={getSubtitlePositionStyle(subtitleSettings)}
+        >
+          <div
+            id="arn-subtitle-text"
+            dir="auto"
+            className="inline-block text-center select-none max-w-[92%] sm:max-w-[85%] transition-all duration-150 leading-relaxed font-bold tracking-wide"
+            style={{
+              fontFamily: `'${subtitleSettings.fontFamily || 'Cairo'}', 'Alexandria', 'Tajawal', 'Inter', sans-serif`,
+              fontSize: subtitleSettings.fontSize || '20px',
+              color: subtitleSettings.color || '#FFFFFF',
+              backgroundColor: hexToRgba(subtitleSettings.bgColor, subtitleSettings.bgOpacity),
+              textShadow: buildCueTextShadow(subtitleSettings.textShadow),
+              padding: subtitleSettings.bgOpacity > 0 ? '4px 14px' : '2px 6px',
+              borderRadius: subtitleSettings.bgOpacity > 0 ? '8px' : '0px',
+            }}
+            dangerouslySetInnerHTML={{ __html: formatSubtitleCueHtml(activeCueText) }}
+          />
+        </div>
+      )}
 
       {/* Playback Error Alert Overlay */}
       {playbackError && (
@@ -1486,46 +2677,183 @@ export default function Player() {
         </button>
       </div>
 
-      {/* Up Next Overlay */}
+      {/* Up Next Overlay - Premium Card with Large Poster */}
       {nextUp && (
         <div
           onClick={(e) => e.stopPropagation()}
-          className={`absolute bottom-28 sm:bottom-32 ${isRtl ? 'left-4 sm:left-8' : 'right-4 sm:right-8'} w-[calc(100vw-32px)] sm:w-[320px] bg-black/80 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden shadow-2xl z-40 flex flex-col pointer-events-auto transition-opacity duration-500 animate-fadeIn`}
+          className={`absolute bottom-24 sm:bottom-28 md:bottom-32 ${isRtl ? 'left-3 sm:left-6 md:left-8' : 'right-3 sm:right-6 md:right-8'} w-[calc(100vw-24px)] sm:w-[480px] md:w-[520px] bg-[#070b14]/95 text-white border border-white/15 rounded-3xl overflow-hidden shadow-[0_25px_60px_rgba(0,0,0,0.95)] backdrop-blur-2xl z-40 p-4 sm:p-5 flex flex-col pointer-events-auto transition-all duration-500 animate-slideInUp`}
         >
-          <div className="p-3 bg-white/5 border-b border-white/10 flex items-center justify-between">
-            <span className="text-sm font-semibold text-white/90">
-              {isRtl ? 'التالي' : 'Up Next'}
-            </span>
-            <span className="text-xs font-bold text-primaryMovies bg-primaryMovies/20 px-2 py-0.5 rounded">
-              {countdown}s
-            </span>
-          </div>
-          <div className="p-4 flex gap-4">
-            <div className="w-16 h-24 rounded bg-white/10 flex-shrink-0 overflow-hidden">
-               {nextUp.poster || nextUp.series_poster ? <img src={nextUp.poster || nextUp.series_poster} alt={nextUp.title || "Poster"} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center bg-white/5"><Tv size={20} className="text-white/30" /></div>}
+          {/* Header Row: Next Episode Notification & Countdown Badge */}
+          <div className="flex items-center justify-between pb-3 mb-3 border-b border-white/10">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
+              <span className="text-xs sm:text-sm font-extrabold uppercase tracking-wide text-white/90">
+                {isRtl ? 'الحلقة التالية' : 'Up Next'}
+              </span>
             </div>
-            <div className="flex-1 min-w-0 flex flex-col justify-center">
-               <div className="text-xs text-white/60 mb-1">{nextUp.series_title}</div>
-               {nextUp.episode_number ? (
-                 <>
-                   <div className="text-sm font-bold text-white truncate mb-1">
-                     {isRtl ? `الحلقة ${nextUp.episode_number}` : `Episode ${nextUp.episode_number}`}
-                   </div>
-                   <div className="text-xs text-white/80 truncate mb-3">{nextUp.title}</div>
-                 </>
-               ) : (
-                 <div className="text-sm font-bold text-white truncate mb-3">{nextUp.title}</div>
-               )}
-               
-               <button
-                 onClick={(e) => {
-                   e.stopPropagation();
-                   handleNextVideo();
-                 }}
-                 className="w-full py-1.5 rounded bg-primaryMovies text-white text-xs font-semibold hover:brightness-110 transition flex items-center justify-center gap-2 shadow-lg touch-manipulation"
-               >
-                 <Play size={12} fill="white" /> {isRtl ? 'تشغيل الآن' : 'Play Now'}
-               </button>
+
+            <div className="flex items-center gap-2">
+              {/* Countdown Badge (live remaining time, urgent in the final seconds) */}
+              {countdown !== null && (
+                <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-bold shadow-inner transition-all duration-300 ${
+                  countdown <= UP_NEXT_COUNTDOWN
+                    ? 'bg-red-600/30 border-red-500/60 text-red-300 animate-pulse'
+                    : 'bg-red-600/20 border-red-500/40 text-red-400'
+                }`}>
+                  <Clock size={12} className={countdown <= UP_NEXT_COUNTDOWN ? 'animate-spin' : ''} style={{ animationDuration: '4s' }} />
+                  <span>{isRtl ? `خلال ${countdown} ث` : `in ${countdown}s`}</span>
+                </div>
+              )}
+
+              {/* Dismiss button (cancels autoplay for this episode) */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  upNextCancelledRef.current = true;
+                  nextUpTriggered.current = true;
+                  setNextUp(null);
+                  setCountdown(null);
+                }}
+                className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center transition"
+                title={isRtl ? 'إلغاء التشغيل التلقائي' : 'Cancel autoplay'}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+
+          {/* Body Row: Large Poster + Episode Details */}
+          <div className="flex items-center gap-4 sm:gap-5">
+            {/* Large Poster matching the player bottom bar style */}
+            <div className="w-24 sm:w-28 md:w-32 aspect-[2/3] rounded-2xl overflow-hidden shadow-[0_15px_35px_rgba(0,0,0,0.9)] bg-white/5 flex-shrink-0 border-2 border-white/20 ring-1 ring-black/60 relative group select-none">
+              {(nextUp.poster || nextUp.series_poster || posterSrc) ? (
+                <img
+                  src={nextUp.poster || nextUp.series_poster || posterSrc}
+                  alt={nextUp.title || "Next Episode"}
+                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  loading="eager"
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center bg-white/5 text-white/30">
+                  <Tv size={28} />
+                </div>
+              )}
+              {nextUp.episode_number ? (
+                <div className="absolute top-2 rtl:right-2 ltr:left-2 px-2 py-0.5 rounded-lg bg-black/85 backdrop-blur-md border border-white/20 text-[10px] font-extrabold text-white shadow-md">
+                  {isRtl ? `حلقة ${nextUp.episode_number}` : `Ep ${nextUp.episode_number}`}
+                </div>
+              ) : null}
+            </div>
+
+            {/* Info and Action Column */}
+            <div className="flex-1 min-w-0 flex flex-col justify-between self-stretch py-0.5">
+              <div className="min-w-0">
+                {/* Series Title */}
+                <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400 mb-1">
+                  <Sparkles size={12} className="text-amber-400 flex-shrink-0" />
+                  <span className="truncate">{nextUp.series_title || displayTitle}</span>
+                </div>
+
+                {/* Episode Number and Title */}
+                <div className="text-sm sm:text-base font-black text-white line-clamp-2 leading-snug">
+                  {nextUp.episode_number
+                    ? (isRtl ? `الحلقة ${nextUp.episode_number}` : `Episode ${nextUp.episode_number}`)
+                    : (nextUp.title || '')}
+                  {nextUp.title && !['1','2','3','4','5','6','7','8','9','10'].includes(String(nextUp.title).trim()) && !String(nextUp.title).toLowerCase().startsWith('episode') && !String(nextUp.title).startsWith('الحلقة')
+                    ? ` : ${nextUp.title}`
+                    : ''}
+                </div>
+
+                {/* Subtext info */}
+                <div className="text-[11px] text-slate-300/80 mt-1 line-clamp-1">
+                  {isRtl ? 'سيبدأ التشغيل التلقائي فور انتهاء الوقت' : 'Will play automatically once the timer ends'}
+                </div>
+              </div>
+
+              {/* Play Now Button */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleNextVideo();
+                }}
+                className="mt-3 w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-red-600 via-rose-600 to-red-600 hover:brightness-110 active:scale-95 text-white text-xs sm:text-sm font-extrabold flex items-center justify-center gap-2 shadow-lg shadow-red-950/60 border border-rose-400/30 transition-all duration-200 touch-manipulation cursor-pointer group/btn"
+              >
+                <Play size={15} fill="white" className="transition-transform duration-200 group-hover/btn:scale-110" />
+                <span>{isRtl ? 'تشغيل الآن' : 'Play Now'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Skip Intro / Outro Floating Button (Netflix-Style, chapter-aware) */}
+      {skipMarker && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className={`absolute bottom-24 sm:bottom-28 ${isRtl ? 'left-4 sm:left-8' : 'right-4 sm:right-8'} z-40 animate-slideInUp`}
+        >
+          <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-black/85 backdrop-blur-xl border border-white/20 shadow-[0_10px_30px_rgba(0,0,0,0.8)] backdrop-blur">
+            <button
+              onClick={() => {
+                const markerNow = skipMarker;
+                if (!markerNow) return;
+                performSeek(markerNow.target);
+                dismissedMarkerKeyRef.current = skipMarkerKeyRef.current;
+                skipMarkerRef.current = null;
+                setSkipMarker(null);
+                showFeedbackBadge(
+                  markerNow.type === 'outro'
+                    ? (isRtl ? 'تم تخطي التتر والنهاية' : 'Outro Skipped')
+                    : (isRtl ? 'تم تخطي المقدمة' : 'Intro Skipped'),
+                  FastForward
+                );
+              }}
+              className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/25 active:scale-95 text-white text-xs sm:text-sm font-bold flex items-center gap-2 transition duration-200 group touch-manipulation cursor-pointer"
+            >
+              <FastForward size={16} className="text-amber-400 group-hover:translate-x-0.5 transition-transform rtl:-scale-x-100" />
+              <span>
+                {skipMarker.type === 'outro'
+                  ? (isRtl ? 'تخطي التتر' : 'Skip Outro')
+                  : (isRtl ? 'تخطي المقدمة' : 'Skip Intro')}
+              </span>
+            </button>
+            <button
+              onClick={() => {
+                dismissedMarkerKeyRef.current = skipMarkerKeyRef.current;
+                skipMarkerRef.current = null;
+                setSkipMarker(null);
+              }}
+              className="p-2 rounded-xl hover:bg-white/15 text-white/60 hover:text-white transition"
+              title={isRtl ? 'إغلاق' : 'Dismiss'}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Touch Gesture OSD Overlay */}
+      {touchIndicator && (
+        <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-50 animate-fadeIn">
+          <div className="px-5 py-3 rounded-2xl bg-black/90 backdrop-blur-xl text-white font-extrabold border border-white/20 shadow-2xl flex items-center gap-3">
+            {touchIndicator.type === 'volume' && (
+              touchIndicator.value === 0 ? <VolumeX size={24} className="text-red-400" /> : <Volume2 size={24} className="text-blue-400" />
+            )}
+            {touchIndicator.type === 'brightness' && <Sun size={24} className="text-amber-400" />}
+            {touchIndicator.type === 'seek' && <FastForward size={24} className="text-rose-500" />}
+            <div className="flex flex-col">
+              <span className="text-xs text-white/70">{touchIndicator.text}</span>
+              {touchIndicator.value !== undefined && (
+                <div className="flex items-center gap-2 mt-1">
+                  <div className="w-24 h-1.5 bg-white/20 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-red-500 to-rose-400 rounded-full"
+                      style={{ width: `${Math.min(100, Math.max(0, touchIndicator.value))}%` }}
+                    />
+                  </div>
+                  <span className="font-mono text-xs">{Math.round(touchIndicator.value)}%</span>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1580,22 +2908,103 @@ export default function Player() {
           </div>
         </div>
 
-        {activeRemoteSession && (
+        {/* Top-Right Control Buttons (Watch Party, Sleep Timer, Remote Control) */}
+        <div className="flex items-center gap-2">
+          {/* Watch Party button */}
           <button
             onClick={(e) => {
               e.stopPropagation();
-              openFullRemote();
+              setShowWatchPartyModal(true);
             }}
-            className="px-3.5 py-2 rounded-2xl bg-gradient-to-r from-red-600 to-rose-600 hover:brightness-110 text-white text-xs font-bold flex items-center gap-2 shadow-lg shadow-red-900/40 border border-rose-400/40 transition active:scale-95 animate-pulse"
-            title={isRtl ? 'فتح مركز التحكم الكامل' : 'Open Full Remote'}
+            className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 backdrop-blur-md transition-all shadow-md active:scale-95 ${
+              syncRoomId
+                ? 'bg-gradient-to-r from-sky-500 to-indigo-600 text-white ring-2 ring-sky-400/40'
+                : 'bg-white/10 hover:bg-white/20 text-white/90 hover:text-white border border-white/15'
+            }`}
+            title={isRtl ? 'المشاهدة الجماعية (Watch Party)' : 'Watch Party'}
           >
-            <SlidersHorizontal size={14} />
+            <Users size={14} className={syncRoomId ? 'text-white' : 'text-sky-400'} />
             <span className="hidden sm:inline">
-              {isRtl ? `التحكم في ${activeRemoteSession.targetDeviceName}` : `Control ${activeRemoteSession.targetDeviceName}`}
+              {syncRoomId ? `${syncRoomId} (${syncMembers.length})` : (isRtl ? 'مشاهدة جماعية' : 'Watch Party')}
             </span>
-            <span className="sm:hidden">{isRtl ? 'التحكم الكامل' : 'Full Remote'}</span>
           </button>
-        )}
+
+          {/* Smart Sleep Timer Button & Dropdown */}
+          <div className="relative">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowSleepMenu(prev => !prev);
+              }}
+              className={`px-2.5 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 backdrop-blur-md transition-all shadow-md active:scale-95 ${
+                sleepTimer
+                  ? 'bg-amber-500/25 border border-amber-400/50 text-amber-300 ring-2 ring-amber-400/20'
+                  : 'bg-white/10 hover:bg-white/20 text-white/80 hover:text-white border border-white/15'
+              }`}
+              title={isRtl ? 'مؤقت النوم الذكي' : 'Smart Sleep Timer'}
+            >
+              <Moon size={14} className={sleepTimer ? 'text-amber-300' : 'text-white/80'} />
+              {sleepTimer ? (
+                <span className="font-mono text-[11px] font-bold">
+                  {Math.floor(sleepTimeRemaining / 60)}:{String(sleepTimeRemaining % 60).padStart(2, '0')}
+                </span>
+              ) : (
+                <span className="hidden md:inline">{isRtl ? 'مؤقت النوم' : 'Sleep'}</span>
+              )}
+            </button>
+
+            {/* Sleep Timer Menu */}
+            {showSleepMenu && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className={`absolute top-10 ${isRtl ? 'left-0' : 'right-0'} bg-slate-900/95 backdrop-blur-xl border border-white/20 rounded-xl p-1.5 shadow-2xl z-50 min-w-[155px] animate-fadeIn text-white`}
+              >
+                <div className="text-[11px] font-semibold text-white/70 px-2.5 py-1 border-b border-white/10 mb-1 flex items-center gap-1.5">
+                  <Moon size={12} className="text-amber-400" />
+                  <span>{isRtl ? 'مؤقت النوم الذكي' : 'Sleep Timer'}</span>
+                </div>
+                {[
+                  { id: '15', labelAr: '⏱️ 15 دقيقة', labelEn: '15 minutes' },
+                  { id: '30', labelAr: '⏱️ 30 دقيقة', labelEn: '30 minutes' },
+                  { id: '45', labelAr: '⏱️ 45 دقيقة', labelEn: '45 minutes' },
+                  { id: '60', labelAr: '⏱️ 60 دقيقة', labelEn: '60 minutes' },
+                  { id: 'end_of_episode', labelAr: '🎬 عند نهاية العمل', labelEn: 'End of Video' },
+                  { id: 'off', labelAr: '❌ إيقاف المؤقت', labelEn: 'Turn off timer' }
+                ].map(opt => (
+                  <button
+                    key={opt.id}
+                    onClick={() => setSleepTimerOption(opt.id)}
+                    className={`w-full px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between transition ${
+                      sleepTimer?.mode === opt.id
+                        ? 'bg-amber-500/30 text-amber-300 font-bold'
+                        : 'text-white/80 hover:bg-white/10'
+                    }`}
+                  >
+                    <span>{isRtl ? opt.labelAr : opt.labelEn}</span>
+                    {sleepTimer?.mode === opt.id && <Check size={13} className="text-amber-400" />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {activeRemoteSession && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                openFullRemote();
+              }}
+              className="px-3.5 py-2 rounded-2xl bg-gradient-to-r from-red-600 to-rose-600 hover:brightness-110 text-white text-xs font-bold flex items-center gap-2 shadow-lg shadow-red-900/40 border border-rose-400/40 transition active:scale-95 animate-pulse"
+              title={isRtl ? 'فتح مركز التحكم الكامل' : 'Open Full Remote'}
+            >
+              <SlidersHorizontal size={14} />
+              <span className="hidden sm:inline">
+                {isRtl ? `التحكم في ${activeRemoteSession.targetDeviceName}` : `Control ${activeRemoteSession.targetDeviceName}`}
+              </span>
+              <span className="sm:hidden">{isRtl ? 'التحكم الكامل' : 'Full Remote'}</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Bottom Controls Overlay */}
@@ -1662,13 +3071,29 @@ export default function Player() {
                 />
               </div>
 
-              {/* Hover timestamp preview */}
+              {/* Hover thumbnail + timestamp preview */}
               {hoverTime !== null && (
                 <div
-                  className="absolute -top-8 -translate-x-1/2 px-2.5 py-1 rounded-md bg-black/90 backdrop-blur-md text-[11px] font-mono font-medium text-white border border-white/20 pointer-events-none shadow-xl whitespace-nowrap hidden sm:block z-20"
-                  style={{ left: `${hoverPosition}%` }}
+                  className="absolute -top-[86px] -translate-x-1/2 hidden sm:flex flex-col items-center gap-1 pointer-events-none z-20"
+                  style={{ left: `${Math.min(92, Math.max(8, hoverPosition))}%` }}
                 >
-                  {formatTime(hoverTime)}
+                  {hoverThumbUrl ? (
+                    <div className="rounded-lg overflow-hidden border border-white/25 bg-black shadow-[0_8px_24px_rgba(0,0,0,0.7)] w-[144px] h-[81px] flex items-center justify-center">
+                      <img
+                        src={hoverThumbUrl}
+                        alt=""
+                        className="w-full h-full object-cover"
+                        draggable={false}
+                      />
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-white/15 bg-black/70 w-[144px] h-[81px] flex items-center justify-center">
+                      <span className="text-[10px] text-white/40 font-mono">{formatTime(hoverTime)}</span>
+                    </div>
+                  )}
+                  <div className="px-2.5 py-1 rounded-md bg-black/90 backdrop-blur-md text-[11px] font-mono font-medium text-white border border-white/20 shadow-xl whitespace-nowrap">
+                    {formatTime(hoverTime)}
+                  </div>
                 </div>
               )}
             </div>
@@ -1917,6 +3342,91 @@ export default function Player() {
                           </div>
                         );
                       })}
+
+                      {/* Ambient Glow Mode Toggle */}
+                      <div className="pt-2 border-t border-white/10 flex items-center justify-between">
+                        <div className="flex flex-col">
+                          <span className="text-[11px] font-semibold text-white/90">
+                            {isRtl ? 'إضاءة التوهج السينمائي' : 'Ambient Glow'}
+                          </span>
+                          <span className="text-[9px] text-white/50">
+                            {isRtl ? 'عكس ألوان المشهد كإضاءة محيطية' : 'Dynamic ambient lighting'}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={toggleAmbientMode}
+                          className={`w-9 h-5 rounded-full p-0.5 transition-colors duration-200 ease-in-out flex items-center ${
+                            ambientMode ? 'bg-primaryMovies justify-end' : 'bg-white/20 justify-start'
+                          }`}
+                        >
+                          <span className="w-4 h-4 rounded-full bg-white shadow-md transform" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Audio Enhancement (Dialogue Boost & Night Mode) */}
+                <div className="relative">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowAudioEnhanceMenu(prev => !prev);
+                      setShowSpeedMenu(false);
+                      setShowAspectMenu(false);
+                      setShowVisualMenu(false);
+                    }}
+                    className={`px-2 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold backdrop-blur transition-all flex items-center gap-1 sm:gap-1.5 touch-manipulation ${
+                      audioEnhanceMode !== 'off' ? 'bg-primaryMovies text-white ring-2 ring-primaryMovies/40' : 'bg-white/10 hover:bg-white/20 text-white'
+                    }`}
+                    title={isRtl ? 'محرك الصوت المتقدم وتعزيز الحوار' : 'Audio Enhancements'}
+                  >
+                    <Headphones size={13} className="sm:w-3.5 sm:h-3.5" />
+                    <span className="hidden sm:inline">
+                      {audioEnhanceMode === 'dialogue'
+                        ? (isRtl ? 'حوار' : 'Dialogue')
+                        : audioEnhanceMode === 'night'
+                          ? (isRtl ? 'ليلي' : 'Night')
+                          : (isRtl ? 'الصوت' : 'Audio')}
+                    </span>
+                    {audioEnhanceMode !== 'off' && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+                    )}
+                  </button>
+
+                  {/* Audio Enhancement Popup */}
+                  {showAudioEnhanceMenu && (
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      className={`absolute bottom-12 ${isRtl ? 'left-0 sm:left-0' : 'right-0 sm:right-0'} bg-slate-900/95 backdrop-blur-xl border border-white/20 rounded-xl p-2.5 shadow-2xl z-50 w-[240px] max-w-[calc(100vw-24px)] animate-fadeIn flex flex-col gap-1.5 text-white`}
+                    >
+                      <div className="text-[11px] font-semibold text-white/70 px-1.5 py-1 border-b border-white/15 mb-1 flex items-center gap-1.5">
+                        <Headphones size={13} className="text-primaryMovies" />
+                        <span>{isRtl ? 'محرك تحسين الصوت الذكي' : 'Audio Enhancement'}</span>
+                      </div>
+
+                      {[
+                        { id: 'off', labelAr: '🔊 عادي (افتراضي)', labelEn: 'Normal (Default)', descAr: 'الصوت الأصلي دون معالجة' },
+                        { id: 'dialogue', labelAr: '🗣️ تعزيز حوار الشخصيات', labelEn: 'Dialogue Boost', descAr: 'تضخيم نبرات الكلام البشري لعزل الحوار' },
+                        { id: 'night', labelAr: '🌙 الوضع الليلي (Night Mode)', labelEn: 'Night Mode', descAr: 'موازنة الانفجارات وخفض الأصوات المفاجئة' }
+                      ].map(item => (
+                        <button
+                          key={item.id}
+                          onClick={() => setAudioMode(item.id)}
+                          className={`w-full p-2 rounded-lg text-start flex items-start justify-between transition ${
+                            audioEnhanceMode === item.id
+                              ? 'bg-primaryMovies text-white font-bold shadow'
+                              : 'hover:bg-white/10 text-white/80'
+                          }`}
+                        >
+                          <div className="flex flex-col">
+                            <span className="text-xs">{item.labelAr}</span>
+                            <span className="text-[10px] text-white/60 mt-0.5">{item.descAr}</span>
+                          </div>
+                          {audioEnhanceMode === item.id && <Check size={14} className="mt-0.5 flex-shrink-0" />}
+                        </button>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -2029,6 +3539,527 @@ export default function Player() {
                           {playbackSpeed === spd && <Check size={14} />}
                         </button>
                       ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Advanced Subtitles Hub Button & Modal */}
+                <div className="relative">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowSubtitleMenu(prev => !prev);
+                      setShowSpeedMenu(false);
+                      setShowAspectMenu(false);
+                      setShowVisualMenu(false);
+                    }}
+                    className={`px-2 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold backdrop-blur transition-all flex items-center gap-1 sm:gap-1.5 touch-manipulation ${
+                      showSubtitleMenu || selectedSubtitle ? 'bg-primaryMovies text-white' : 'bg-white/10 hover:bg-white/20 text-white'
+                    }`}
+                    title={isRtl ? 'إعدادات والبحث عن الترجمة (C)' : 'Subtitles & Customization (C)'}
+                  >
+                    <Subtitles size={13} className="sm:w-3.5 sm:h-3.5" />
+                    <span>{isRtl ? 'الترجمة' : 'Subtitles'}</span>
+                    {selectedSubtitle && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-white shadow-sm ring-1 ring-white/50" />
+                    )}
+                  </button>
+
+                  {/* Subtitles Glassmorphic Drawer / Popup */}
+                  {showSubtitleMenu && (
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      className={`absolute bottom-12 ${isRtl ? 'left-0 sm:left-0' : 'right-0 sm:right-0'} bg-slate-900/95 backdrop-blur-2xl border border-white/20 rounded-2xl p-3 shadow-2xl z-50 w-[300px] sm:w-[360px] max-w-[calc(100vw-24px)] flex flex-col gap-2.5 animate-fadeIn text-white`}
+                    >
+                      {/* Header with Tabs */}
+                      <div className="flex items-center justify-between border-b border-white/15 pb-2">
+                        <div className="flex items-center gap-1 bg-white/5 p-0.5 rounded-lg border border-white/10">
+                          <button
+                            onClick={() => setSubtitleTab('tracks')}
+                            className={`px-2 py-1 rounded-md text-[10px] font-bold transition ${
+                              subtitleTab === 'tracks' ? 'bg-primaryMovies text-white' : 'text-white/60 hover:text-white'
+                            }`}
+                          >
+                            {isRtl ? 'الملفات' : 'Tracks'}
+                          </button>
+                          <button
+                            onClick={() => setSubtitleTab('style')}
+                            className={`px-2 py-1 rounded-md text-[10px] font-bold transition ${
+                              subtitleTab === 'style' ? 'bg-primaryMovies text-white' : 'text-white/60 hover:text-white'
+                            }`}
+                          >
+                            {isRtl ? 'المظهر' : 'Style'}
+                          </button>
+                          <button
+                            onClick={() => {
+                              setSubtitleTab('search');
+                              if (onlineSubtitles.length === 0 && !searchingOnlineSubs) {
+                                setSearchingOnlineSubs(true);
+                                authFetch(`/api/subtitles/${type}/${id}/search?language=ar`)
+                                  .then(r => r.json())
+                                  .then(res => {
+                                    setOnlineSubtitles(res.data || []);
+                                    setSearchingOnlineSubs(false);
+                                  })
+                                  .catch(() => setSearchingOnlineSubs(false));
+                              }
+                            }}
+                            className={`px-2 py-1 rounded-md text-[10px] font-bold transition ${
+                              subtitleTab === 'search' ? 'bg-primaryMovies text-white' : 'text-white/60 hover:text-white'
+                            }`}
+                          >
+                            {isRtl ? 'بحث أونلاين' : 'Search'}
+                          </button>
+                        </div>
+
+                        <button
+                          onClick={() => setShowSubtitleMenu(false)}
+                          className="w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 text-white/60 hover:text-white flex items-center justify-center transition"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+
+                      {/* Tab 1: Subtitle Tracks */}
+                      {subtitleTab === 'tracks' && (
+                        <div className="flex flex-col gap-1 max-h-[220px] overflow-y-auto pr-1">
+                          {/* Disable Subtitles Option */}
+                          <button
+                            onClick={() => {
+                              setSelectedSubtitle(null);
+                              const vid = videoRef.current;
+                              if (vid && vid.textTracks) {
+                                for (let i = 0; i < vid.textTracks.length; i++) {
+                                  vid.textTracks[i].mode = 'disabled';
+                                }
+                              }
+                              showFeedbackBadge(isRtl ? 'تم إيقاف الترجمة' : 'Subtitles Off', Subtitles);
+                            }}
+                            className={`w-full px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between transition ${
+                              !selectedSubtitle ? 'bg-primaryMovies text-white font-bold' : 'hover:bg-white/10 text-white/70'
+                            }`}
+                          >
+                            <span>{isRtl ? 'إيقاف الترجمة' : 'Turn Off Subtitles'}</span>
+                            {!selectedSubtitle && <Check size={14} />}
+                          </button>
+
+                          {availableSubtitles.length === 0 ? (
+                            <div className="text-center py-4 text-xs text-white/50">
+                              {isRtl ? 'لا توجد ترجمات متاحة حالياً' : 'No available subtitles found'}
+                            </div>
+                          ) : (
+                            availableSubtitles.map((sub, idx) => {
+                              const isSelected = !!selectedSubtitle && (
+                                (sub.id && selectedSubtitle.id === sub.id) ||
+                                (sub.path && selectedSubtitle.path === sub.path) ||
+                                (sub.streamIndex !== undefined && (selectedSubtitle.streamIndex === sub.streamIndex || selectedSubtitle.index === sub.streamIndex)) ||
+                                (sub.index !== undefined && (selectedSubtitle.index === sub.index || selectedSubtitle.streamIndex === sub.index))
+                              );
+                              return (
+                                <button
+                                  key={sub.id || sub.path || sub.streamIndex || idx}
+                                  onClick={() => {
+                                    setSelectedSubtitle(sub);
+                                    showFeedbackBadge(sub.title || sub.language || (isRtl ? 'العربية' : 'Arabic'), Subtitles);
+                                  }}
+                                  className={`w-full px-2.5 py-2 rounded-lg text-xs flex items-center justify-between transition gap-2 ${
+                                    isSelected ? 'bg-primaryMovies text-white font-bold shadow' : 'hover:bg-white/10 text-white/80'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2 truncate">
+                                    <Subtitles size={13} className={isSelected ? 'text-white' : 'text-white/50'} />
+                                    <span className="truncate">{sub.title || sub.filename || sub.language || (isRtl ? `ترجمة #${idx + 1}` : `Track #${idx + 1}`)}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                                    {sub.language && (
+                                      <span className="text-[10px] uppercase font-mono px-1 py-0.5 rounded bg-white/10 text-white/70">
+                                        {sub.language}
+                                      </span>
+                                    )}
+                                    {isSelected && <Check size={14} />}
+                                  </div>
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
+                      )}
+
+                      {/* Tab 2: Style & Offset Synchronization */}
+                      {subtitleTab === 'style' && (
+                        <div className="flex flex-col gap-3 py-1 max-h-[340px] sm:max-h-[400px] overflow-y-auto custom-scrollbar pr-1">
+                          {/* Subtitle Offset / Delay Sync */}
+                          <div className="flex flex-col gap-1.5 bg-white/5 p-2 rounded-xl border border-white/10">
+                            <div className="flex justify-between items-center text-xs text-white/80">
+                              <span className="font-semibold">{isRtl ? 'مزامنة الترجمة (تأخير / تقديم)' : 'Subtitle Sync / Delay'}</span>
+                              <span className="font-mono text-primaryMovies font-bold">
+                                {subtitleOffset > 0 ? `+${subtitleOffset.toFixed(1)}s` : `${subtitleOffset.toFixed(1)}s`}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => {
+                                  const newOffset = Number(Math.max(-10, Math.min(10, subtitleOffset - 0.1)).toFixed(1));
+                                  setSubtitleOffset(newOffset);
+                                  try { localStorage.setItem('arn_player_subtitle_offset', String(newOffset)); } catch {}
+                                }}
+                                className="px-2 py-1 rounded-md bg-white/10 hover:bg-white/20 text-xs font-mono font-bold"
+                                title={isRtl ? 'تأخير 0.1 ثانية' : 'Delay 0.1s'}
+                              >
+                                -0.1s
+                              </button>
+                              <input
+                                type="range"
+                                min="-10"
+                                max="10"
+                                step="0.1"
+                                value={subtitleOffset}
+                                onChange={(e) => {
+                                  const val = Number(Number(e.target.value).toFixed(1));
+                                  setSubtitleOffset(val);
+                                  try { localStorage.setItem('arn_player_subtitle_offset', String(val)); } catch {}
+                                }}
+                                className="flex-1 h-1.5 bg-white/20 rounded-lg appearance-none cursor-pointer accent-primaryMovies"
+                              />
+                              <button
+                                onClick={() => {
+                                  const newOffset = Number(Math.max(-10, Math.min(10, subtitleOffset + 0.1)).toFixed(1));
+                                  setSubtitleOffset(newOffset);
+                                  try { localStorage.setItem('arn_player_subtitle_offset', String(newOffset)); } catch {}
+                                }}
+                                className="px-2 py-1 rounded-md bg-white/10 hover:bg-white/20 text-xs font-mono font-bold"
+                                title={isRtl ? 'تقديم 0.1 ثانية' : 'Advance 0.1s'}
+                              >
+                                +0.1s
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setSubtitleOffset(0);
+                                  try { localStorage.setItem('arn_player_subtitle_offset', '0'); } catch {}
+                                }}
+                                className="px-2 py-1 rounded-md bg-white/10 hover:bg-white/20 text-[10px] text-white/60 hover:text-white"
+                                title={isRtl ? 'تصفير' : 'Reset'}
+                              >
+                                0
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Font Family Selector */}
+                          <div className="flex flex-col gap-1">
+                            <span className="text-[11px] font-semibold text-white/70">{isRtl ? 'نوع خط الترجمة' : 'Font Family'}</span>
+                            <div className="grid grid-cols-3 gap-1">
+                              {[
+                                { id: 'Cairo', labelAr: 'كايرو', labelEn: 'Cairo', family: 'Cairo' },
+                                { id: 'Alexandria', labelAr: 'الإسكندرية', labelEn: 'Alexandria', family: 'Alexandria' },
+                                { id: 'Tajawal', labelAr: 'تجوال', labelEn: 'Tajawal', family: 'Tajawal' },
+                                { id: 'Inter', labelAr: 'إنتر', labelEn: 'Inter', family: 'Inter' },
+                                { id: 'Arial', labelAr: 'أريال', labelEn: 'Arial', family: 'Arial' }
+                              ].map(f => (
+                                <button
+                                  key={f.id}
+                                  onClick={() => updateSubtitleSetting('fontFamily', f.id)}
+                                  style={{ fontFamily: f.family }}
+                                  className={`py-1.5 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center truncate ${
+                                    (subtitleSettings.fontFamily || 'Cairo') === f.id
+                                      ? 'bg-primaryMovies text-white shadow-md'
+                                      : 'bg-white/5 hover:bg-white/15 text-white/70 hover:text-white'
+                                  }`}
+                                >
+                                  {isRtl ? f.labelAr : f.labelEn}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Subtitle Position & Vertical Offset */}
+                          <div className="flex flex-col gap-1.5 bg-white/5 p-2 rounded-xl border border-white/10">
+                            <div className="flex justify-between items-center text-[11px] font-semibold text-white/70">
+                              <span>{isRtl ? 'مكان ظهور الترجمة' : 'Subtitle Placement'}</span>
+                              <span className="text-primaryMovies font-mono text-[10px] font-bold">
+                                {subtitleSettings.position === 'top'
+                                  ? (isRtl ? `أعلى (${subtitleSettings.verticalOffset || 8}%)` : `Top (${subtitleSettings.verticalOffset || 8}%)`)
+                                  : subtitleSettings.position === 'middle'
+                                    ? (isRtl ? 'وسط الشاشة' : 'Center')
+                                    : (isRtl ? `أسفل (${subtitleSettings.verticalOffset || 8}%)` : `Bottom (${subtitleSettings.verticalOffset || 8}%)`)}
+                              </span>
+                            </div>
+
+                            {/* Position buttons */}
+                            <div className="grid grid-cols-3 gap-1">
+                              {[
+                                { id: 'bottom', labelAr: 'أسفل الشاشة', labelEn: 'Bottom' },
+                                { id: 'middle', labelAr: 'وسط الشاشة', labelEn: 'Center' },
+                                { id: 'top', labelAr: 'أعلى الشاشة', labelEn: 'Top' }
+                              ].map(pos => (
+                                <button
+                                  key={pos.id}
+                                  onClick={() => updateSubtitleSetting('position', pos.id)}
+                                  className={`py-1 rounded-md text-[10px] font-bold transition ${
+                                    (subtitleSettings.position || 'bottom') === pos.id
+                                      ? 'bg-primaryMovies text-white shadow'
+                                      : 'bg-white/5 hover:bg-white/15 text-white/70'
+                                  }`}
+                                >
+                                  {isRtl ? pos.labelAr : pos.labelEn}
+                                </button>
+                              ))}
+                            </div>
+
+                            {/* Vertical offset slider (only active when not centered) */}
+                            {subtitleSettings.position !== 'middle' && (
+                              <div className="flex flex-col gap-1 mt-1">
+                                <div className="flex justify-between text-[10px] text-white/60">
+                                  <span>{subtitleSettings.position === 'top' ? (isRtl ? 'المسافة من أعلى' : 'Top Offset') : (isRtl ? 'المسافة من أسفل' : 'Bottom Offset')}</span>
+                                  <span className="font-mono text-white/80">{subtitleSettings.verticalOffset || 8}%</span>
+                                </div>
+                                <input
+                                  type="range"
+                                  min="2"
+                                  max="35"
+                                  step="1"
+                                  value={subtitleSettings.verticalOffset || 8}
+                                  onChange={(e) => updateSubtitleSetting('verticalOffset', Number(e.target.value))}
+                                  className="w-full h-1.5 bg-white/20 rounded-lg appearance-none cursor-pointer accent-primaryMovies"
+                                />
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Font Size Preset */}
+                          <div className="flex flex-col gap-1">
+                            <span className="text-[11px] font-semibold text-white/70">{isRtl ? 'حجم خط الترجمة' : 'Font Size'}</span>
+                            <div className="grid grid-cols-4 gap-1">
+                              {[
+                                { id: '16px', labelAr: 'صغير', labelEn: 'Small' },
+                                { id: '20px', labelAr: 'متوسط', labelEn: 'Medium' },
+                                { id: '26px', labelAr: 'كبير', labelEn: 'Large' },
+                                { id: '32px', labelAr: 'ضخم', labelEn: 'Huge' }
+                              ].map(f => (
+                                <button
+                                  key={f.id}
+                                  onClick={() => updateSubtitleSetting('fontSize', f.id)}
+                                  className={`py-1 rounded-md text-[10px] font-bold transition ${
+                                    (subtitleSettings.fontSize || '20px') === f.id
+                                      ? 'bg-primaryMovies text-white shadow'
+                                      : 'bg-white/5 hover:bg-white/15 text-white/70'
+                                  }`}
+                                >
+                                  {isRtl ? f.labelAr : f.labelEn}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Text Color */}
+                          <div className="flex flex-col gap-1">
+                            <span className="text-[11px] font-semibold text-white/70">{isRtl ? 'لون النص' : 'Text Color'}</span>
+                            <div className="flex items-center gap-2">
+                              {['#FFFFFF', '#FEF08A', '#38BDF8', '#4ADE80', '#FBBF24', '#F472B6'].map(color => (
+                                <button
+                                  key={color}
+                                  onClick={() => updateSubtitleSetting('color', color)}
+                                  style={{ backgroundColor: color }}
+                                  className={`w-7 h-7 rounded-full border-2 transition ${
+                                    subtitleSettings.color === color ? 'border-white scale-110 shadow-md ring-2 ring-primaryMovies/60' : 'border-black/50 opacity-80 hover:opacity-100'
+                                  }`}
+                                />
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Background Color */}
+                          <div className="flex flex-col gap-1">
+                            <span className="text-[11px] font-semibold text-white/70">{isRtl ? 'لون خلفية النص' : 'Background Color'}</span>
+                            <div className="flex items-center gap-2">
+                              {['#000000', '#1E293B', '#0F172A', '#450A0A', '#052E16', '#00000000'].map(color => {
+                                const isTransparent = color === '#00000000';
+                                const active = isTransparent
+                                  ? subtitleSettings.bgOpacity === 0
+                                  : subtitleSettings.bgColor === color && subtitleSettings.bgOpacity > 0;
+                                return (
+                                  <button
+                                    key={color}
+                                    onClick={() => {
+                                      if (isTransparent) {
+                                        updateSubtitleSetting('bgOpacity', 0);
+                                      } else {
+                                        setSubtitleSettings(prev => {
+                                          const next = { ...prev, bgColor: color, bgOpacity: prev.bgOpacity > 0 ? prev.bgOpacity : 0.75 };
+                                          try { localStorage.setItem('arn_player_subtitle_settings', JSON.stringify(next)); } catch {}
+                                          return next;
+                                        });
+                                      }
+                                    }}
+                                    style={isTransparent
+                                      ? { background: 'repeating-conic-gradient(#94a3b8 0% 25%, #1e293b 0% 50%) 50%/12px 12px' }
+                                      : { backgroundColor: color }}
+                                    className={`w-7 h-7 rounded-full border-2 transition ${
+                                      active ? 'border-white scale-110 shadow-md ring-2 ring-primaryMovies/60' : 'border-black/50 opacity-80 hover:opacity-100'
+                                    }`}
+                                    title={isTransparent ? (isRtl ? 'بدون خلفية' : 'No background') : color}
+                                  />
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Background Opacity */}
+                          <div className="flex flex-col gap-1">
+                            <div className="flex justify-between items-center text-[11px] font-semibold text-white/70">
+                              <span>{isRtl ? 'شفافية الخلفية' : 'Background Opacity'}</span>
+                              <span className="font-mono text-primaryMovies font-bold">{Math.round(subtitleSettings.bgOpacity * 100)}%</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0"
+                              max="1"
+                              step="0.05"
+                              value={subtitleSettings.bgOpacity}
+                              onChange={(e) => updateSubtitleSetting('bgOpacity', Number(e.target.value))}
+                              className="w-full h-1.5 bg-white/20 rounded-lg appearance-none cursor-pointer accent-primaryMovies"
+                            />
+                          </div>
+
+                          {/* Text Shadow / Outline */}
+                          <div className="flex flex-col gap-1">
+                            <span className="text-[11px] font-semibold text-white/70">{isRtl ? 'ظل وتحديد النص' : 'Text Shadow'}</span>
+                            <div className="grid grid-cols-3 gap-1">
+                              {[
+                                { id: 'drop', labelAr: 'ظل ناعم', labelEn: 'Shadow' },
+                                { id: 'outline', labelAr: 'حد محيطي بارز', labelEn: 'Outline' },
+                                { id: 'none', labelAr: 'بدون', labelEn: 'None' }
+                              ].map(sh => (
+                                <button
+                                  key={sh.id}
+                                  onClick={() => updateSubtitleSetting('textShadow', sh.id)}
+                                  className={`py-1 rounded-md text-[10px] font-bold transition ${
+                                    subtitleSettings.textShadow === sh.id
+                                      ? 'bg-primaryMovies text-white shadow'
+                                      : 'bg-white/5 hover:bg-white/15 text-white/70'
+                                  }`}
+                                >
+                                  {isRtl ? sh.labelAr : sh.labelEn}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Live preview */}
+                          <div className="flex items-center justify-center py-3 rounded-xl bg-black/70 border border-white/10 overflow-hidden">
+                            <span
+                              id="arn-subtitle-preview"
+                              className="px-3 py-1.5 leading-snug text-center max-w-[90%] font-bold tracking-wide transition-all select-none"
+                              style={{
+                                fontFamily: `'${subtitleSettings.fontFamily || 'Cairo'}', 'Alexandria', 'Tajawal', 'Inter', sans-serif`,
+                                fontSize: subtitleSettings.fontSize || '20px',
+                                color: subtitleSettings.color || '#FFFFFF',
+                                backgroundColor: hexToRgba(subtitleSettings.bgColor, subtitleSettings.bgOpacity),
+                                textShadow: buildCueTextShadow(subtitleSettings.textShadow),
+                                borderRadius: subtitleSettings.bgOpacity > 0 ? '8px' : '0px'
+                              }}
+                            >
+                              {isRtl ? 'نموذج على الترجمة المخصصة' : 'Custom Subtitle Preview'}
+                            </span>
+                          </div>
+
+                          {/* Reset all style settings */}
+                          <button
+                            onClick={() => {
+                              setSubtitleSettings({ ...DEFAULT_SUBTITLE_SETTINGS });
+                              try { localStorage.setItem('arn_player_subtitle_settings', JSON.stringify(DEFAULT_SUBTITLE_SETTINGS)); } catch {}
+                            }}
+                            className="py-1.5 rounded-lg bg-white/5 hover:bg-white/15 text-[10px] font-bold text-white/60 hover:text-white transition"
+                          >
+                            {isRtl ? 'استعادة المظهر الافتراضي' : 'Reset style'}
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Tab 3: Online Subtitles Search */}
+                      {subtitleTab === 'search' && (
+                        <div className="flex flex-col gap-2 max-h-[220px] overflow-y-auto">
+                          {searchingOnlineSubs ? (
+                            <div className="flex items-center justify-center py-6 gap-2 text-xs text-white/60">
+                              <RefreshCw size={14} className="animate-spin text-primaryMovies" />
+                              <span>{isRtl ? 'جاري البحث في قاعدة البيانات...' : 'Searching subtitles...'}</span>
+                            </div>
+                          ) : onlineSubtitles.length === 0 ? (
+                            <div className="text-center py-6 text-xs text-white/50 flex flex-col items-center gap-2">
+                              <Search size={20} className="text-white/30" />
+                              <span>{isRtl ? 'لم يتم العثور على ترجمات مطابقة أونلاين' : 'No online subtitles found'}</span>
+                              <button
+                                onClick={() => {
+                                  setSearchingOnlineSubs(true);
+                                  authFetch(`/api/subtitles/${type}/${id}/search?language=ar`)
+                                    .then(r => r.json())
+                                    .then(res => {
+                                      setOnlineSubtitles(res.data || []);
+                                      setSearchingOnlineSubs(false);
+                                    })
+                                    .catch(() => setSearchingOnlineSubs(false));
+                                }}
+                                className="px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-semibold text-white"
+                              >
+                                {isRtl ? 'إعادة المحاولة' : 'Retry Search'}
+                              </button>
+                            </div>
+                          ) : (
+                            onlineSubtitles.map((sub, idx) => (
+                              <div
+                                key={sub.id || idx}
+                                className="flex items-center justify-between p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 transition gap-2"
+                              >
+                                <div className="flex flex-col min-w-0">
+                                  <span className="text-xs font-semibold truncate text-white/90">
+                                    {sub.file_name || sub.release || (isRtl ? 'ملف ترجمة عربي' : 'Arabic Subtitle')}
+                                  </span>
+                                  <span className="text-[10px] text-white/50">
+                                    {isRtl ? `التحميلات: ${sub.download_count || 0}` : `Downloads: ${sub.download_count || 0}`}
+                                  </span>
+                                </div>
+                                <button
+                                  disabled={downloadingSubId === (sub.file_id || sub.id)}
+                                  onClick={async () => {
+                                    const fid = sub.file_id || sub.id;
+                                    setDownloadingSubId(fid);
+                                    try {
+                                      const res = await authFetch(`/api/subtitles/${type}/${id}/download`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({
+                                          file_id: fid,
+                                          language: sub.language || 'ar',
+                                          file_name: sub.file_name
+                                        })
+                                      });
+                                      const json = await res.json();
+                                      if (json.data && json.data.path) {
+                                        setAvailableSubtitles(prev => [...prev, json.data]);
+                                        setSelectedSubtitle(json.data);
+                                        setSubtitleTab('tracks');
+                                        showFeedbackBadge(isRtl ? 'تم تحميل وتفعيل الترجمة' : 'Subtitle Downloaded & Activated', Download);
+                                      }
+                                    } catch (err) {
+                                      console.error(err);
+                                    } finally {
+                                      setDownloadingSubId(null);
+                                    }
+                                  }}
+                                  className="px-2.5 py-1 rounded-lg bg-primaryMovies hover:brightness-110 active:scale-95 text-white text-xs font-bold flex items-center gap-1.5 flex-shrink-0 disabled:opacity-50"
+                                >
+                                  {downloadingSubId === (sub.file_id || sub.id) ? (
+                                    <RefreshCw size={12} className="animate-spin" />
+                                  ) : (
+                                    <Download size={12} />
+                                  )}
+                                  <span>{isRtl ? 'تحميل' : 'Get'}</span>
+                                </button>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -2229,6 +4260,51 @@ export default function Player() {
             </div>
           </div>
         )}
+
+        {/* Watch Party Overlay (Live Chat, floating emojis, room bar) - Top Layer */}
+        {syncRoomId && (
+          <WatchPartyOverlay
+            roomId={syncRoomId}
+            isHost={syncIsHost}
+            members={syncMembers}
+            messages={syncMessages}
+            floatingEmojis={floatingEmojis}
+            onSendMessage={(text) => {
+              if (syncWsRef.current?.readyState === WebSocket.OPEN) {
+                syncWsRef.current.send(JSON.stringify({ type: 'CHAT', text }));
+              }
+            }}
+            onSendEmoji={(emoji) => {
+              if (syncWsRef.current?.readyState === WebSocket.OPEN) {
+                syncWsRef.current.send(JSON.stringify({ type: 'EMOJI_BURST', emoji }));
+              }
+            }}
+            onLeaveParty={() => {
+              setSyncRoomId(null);
+              if (syncWsRef.current) {
+                syncWsRef.current.close();
+                syncWsRef.current = null;
+              }
+            }}
+          />
+        )}
+
+        {/* Watch Party Modal (Create or Join) */}
+        <WatchPartyModal
+          isOpen={showWatchPartyModal}
+          onClose={() => setShowWatchPartyModal(false)}
+          mediaType={type}
+          mediaId={id}
+          mediaTitle={displayTitle}
+          currentTime={currentTime}
+          isPlaying={isPlaying}
+          onJoinRoom={(code) => {
+            setSyncRoomId(code);
+            const url = new URL(window.location);
+            url.searchParams.set('roomId', code);
+            window.history.replaceState({}, '', url);
+          }}
+        />
       </div>
     );
   }

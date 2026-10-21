@@ -1,6 +1,6 @@
 {
   "name": "arn-stream-server",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "ARN Stream Backend Server - Media Streaming & Management Engine by ARN Technology",
   "author": "Abdou Ragab Nassar (ARN Technology)",
   "type": "module",

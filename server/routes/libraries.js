@@ -14,6 +14,7 @@ import { scanLibrary } from '../scanner/media-scanner.js';
 import { requireAdmin, requireAuth } from '../services/auth.js';
 import { processAndCacheImage } from '../services/image-cache.js';
 import { invalidateCache } from '../middleware/response-cache.js';
+import { broadcastToAll } from './handoff.js';
 
 const upload = multer({ dest: path.join(getDataDir(), 'tmp_uploads') });
 const router = express.Router();
@@ -291,12 +292,82 @@ router.delete('/:id', requireAdmin, (req, res) => {
   res.json({ data: { success: true } });
 });
 
-// POST /api/libraries/:id/scan -> Scans this specific library instantly
+// POST /api/libraries/:id/scan -> Scans this specific library with live real-time progress
 router.post('/:id/scan', requireAdmin, async (req, res) => {
+  const libId = Number(req.params.id);
+  const lib = getLibraryById(libId);
+  if (!lib) {
+    return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Library not found' } });
+  }
+
   try {
-    const stats = await scanLibrary(req.params.id);
-    res.json({ data: { stats }, message: 'Library scanned successfully' });
+    broadcastToAll('scan_progress', {
+      isScanning: true,
+      progress: 2,
+      current: 0,
+      total: 1,
+      currentFile: `بدء فحص مكتبة "${lib.name}"...`,
+      libraryName: lib.name,
+      phase: lib.type,
+      newCount: 0
+    });
+
+    let lastBroadcast = 0;
+    const stats = await scanLibrary(libId, {
+      onProgress: (info) => {
+        const now = Date.now();
+        if (info.progress === 100 || info.progress <= 2 || now - lastBroadcast > 80) {
+          lastBroadcast = now;
+          broadcastToAll('scan_progress', {
+            isScanning: true,
+            ...info
+          });
+        }
+      }
+    });
+
+    invalidateCache('/api/library');
+    invalidateCache('/api/libraries');
+    invalidateCache(`/api/libraries/${libId}`);
+    if (lib.type === 'movies') invalidateCache('/api/movies');
+    if (lib.type === 'shows') invalidateCache('/api/series');
+    if (lib.type === 'music') {
+      invalidateCache('/api/artists');
+      invalidateCache('/api/albums');
+      invalidateCache('/api/tracks');
+    }
+
+    broadcastToAll('scan_completed', {
+      isScanning: false,
+      progress: 100,
+      phase: 'completed',
+      libraryName: lib.name,
+      stats,
+      newItems: stats.newItemsList || [],
+      count: stats.newItems || 0
+    });
+
+    if (stats.newItems > 0) {
+      broadcastToAll('library_updated', {
+        libraryId: libId,
+        message: `تم العثور على ${stats.newItems} وسائط جديدة في مكتبة "${lib.name}"`,
+        count: stats.newItems,
+        newItems: stats.newItemsList || []
+      });
+    }
+
+    res.json({
+      data: { stats },
+      message: `تم فحص وتحديث مكتبة «${lib.name}» بنجاح.`
+    });
   } catch (e) {
+    console.error(`[Scanner] Error scanning library ${lib.name}:`, e);
+    broadcastToAll('scan_completed', {
+      isScanning: false,
+      phase: 'error',
+      libraryName: lib.name,
+      error: e.message
+    });
     res.status(500).json({ error: { code: 'SCAN_FAILED', message: e.message } });
   }
 });

@@ -36,7 +36,7 @@ export const useSettingsStore = create(
       // Playback Settings
       autoPlayNext: true,
       skipTime: 10, // 10, 15, 30
-      upNextTime: 15, // 10, 15, 30
+      upNextTime: 30, // 10, 15, 30 (30 = roadmap default)
 
       // Live TV / Drama Live Settings
       liveTvUrl: 'https://web.dramalive.cc',

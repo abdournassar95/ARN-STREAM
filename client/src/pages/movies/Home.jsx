@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom';
 import TopBar from '../../components/shared/TopBar';
 import { MovieCard } from '../../components/shared/Card';
 import GlassCarousel from '../../components/shared/GlassCarousel';
+import ContinueWatchingHub from '../../components/shared/ContinueWatchingHub';
 import { fetchMoviesHome } from '../../api/client';
 import Spinner from '../../components/shared/Spinner';
 import { Film, Settings, FolderPlus } from 'lucide-react';
@@ -21,7 +22,12 @@ function Row({ title, items, getTo, empty }) {
 
 export default function MoviesHome() {
   const { t } = useTranslation();
-  const { data, isLoading } = useQuery({ queryKey: ['movies-home'], queryFn: fetchMoviesHome });
+  const { data, isLoading } = useQuery({ 
+    queryKey: ['movies-home'], 
+    queryFn: fetchMoviesHome,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true
+  });
   const { homeSectionsOrder = ['continueWatching', 'recentlyAdded', 'collections', 'movies', 'series'] } = useSettingsStore();
 
   if (isLoading) return <div className="min-h-screen bg-bg"><TopBar variant="movies"/><div className="flex items-center justify-center h-[60vh]"><Spinner/></div></div>;
@@ -32,36 +38,7 @@ export default function MoviesHome() {
     switch (key) {
       case 'continueWatching':
         if (!data?.continueWatching?.length) return null;
-        return (
-          <GlassCarousel key="continueWatching" title={t('common.continueWatching')} className="mb-8">
-            {data.continueWatching.map(c => {
-              const bgImage = c.backdrop || c.poster;
-              return (
-                <Link 
-                  key={`${c.type}-${c.mediaId || c.seriesId || c.id}`} 
-                  to={c.type === 'movie' ? `/watch/movie/${c.mediaId || c.id}?autoPlay=true` : `/watch/episode/${c.mediaId || c.episodeId}?autoPlay=true`} 
-                  className="group relative flex-shrink-0 w-[280px] h-[160px] rounded-xl overflow-hidden bg-surface border border-border hover:border-primaryMovies/50 transition-colors shadow-lg flex flex-col justify-end"
-                >
-                  {bgImage && (
-                    <div 
-                      className="absolute inset-0 bg-cover bg-center group-hover:scale-105 transition-transform duration-500" 
-                      style={{ backgroundImage: `url(${bgImage})` }} 
-                    />
-                  )}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black via-black/60 to-black/10" />
-                  
-                  <div className="relative p-4 z-10">
-                    <div className="font-bold text-text truncate drop-shadow-md text-sm mb-1">{c.title}</div>
-                    <div className="text-xs text-tx/70 font-medium">{Math.round(c.progress)}% watched</div>
-                  </div>
-                  <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-black/50 z-20">
-                    <div className="h-full bg-primaryMovies rounded-r-full shadow-[0_0_8px_rgba(229,9,20,0.8)]" style={{width: `${c.progress}%`}}/>
-                  </div>
-                </Link>
-              );
-            })}
-          </GlassCarousel>
-        );
+        return <ContinueWatchingHub key="continueWatching" items={data.continueWatching} />;
       case 'recentlyAdded':
         return (
           <Row 

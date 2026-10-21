@@ -22,7 +22,7 @@ from PyQt6.QtCore import Qt, QUrl, QTimer, QSize
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 
 APP_NAME = "ARN Stream"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.3"
 SERVER_PORT = 8096
 SERVER_URL = f"http://localhost:{SERVER_PORT}"
 SERVER_SOCKET_KEY = "ARN_Stream_SingleInstance_Server"
@@ -338,6 +338,16 @@ class PersonalStreamTrayApp:
                 pass
             self.server_log_file = None
 
+    def restart_server(self):
+        """Gracefully stop and restart the server process."""
+        self.tray_icon.showMessage(APP_NAME, "جاري إعادة تشغيل السيرفر...", QSystemTrayIcon.MessageIcon.Information, 1500)
+        self.stop_server()
+        QTimer.singleShot(1200, self._finish_restart)
+
+    def _finish_restart(self):
+        self.start_server()
+        self.tray_icon.showMessage(APP_NAME, "تمت إعادة تشغيل السيرفر بنجاح.", QSystemTrayIcon.MessageIcon.Information, 2500)
+
     def open_browser(self):
         webbrowser.open(SERVER_URL)
 
@@ -433,6 +443,10 @@ class PersonalStreamTrayApp:
         self.menu.addAction(about_action)
 
         self.menu.addSeparator()
+
+        restart_action = QAction("🔄 إعادة تشغيل السيرفر", self.menu)
+        restart_action.triggered.connect(self.restart_server)
+        self.menu.addAction(restart_action)
 
         exit_action = QAction("❌ إيقاف السيرفر والخروج", self.menu)
         exit_action.triggered.connect(self.quit_app)

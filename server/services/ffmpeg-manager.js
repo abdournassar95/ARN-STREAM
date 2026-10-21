@@ -37,6 +37,49 @@ export async function detectHwAccel() {
   return cachedHwAccel === false ? null : cachedHwAccel;
 }
 
+export const LANGUAGE_NAMES = {
+  ar: 'العربية (Arabic)',
+  ara: 'العربية (Arabic)',
+  en: 'الإنجليزية (English)',
+  eng: 'الإنجليزية (English)',
+  fr: 'الفرنسية (French)',
+  fra: 'الفرنسية (French)',
+  fre: 'الفرنسية (French)',
+  es: 'الإسبانية (Spanish)',
+  spa: 'الإسبانية (Spanish)',
+  de: 'الألمانية (German)',
+  deu: 'الألمانية (German)',
+  ger: 'الألمانية (German)',
+  it: 'الإيطالية (Italian)',
+  ita: 'الإيطالية (Italian)',
+  tr: 'التركية (Turkish)',
+  tur: 'التركية (Turkish)',
+  ru: 'الروسية (Russian)',
+  rus: 'الروسية (Russian)',
+  zh: 'الصينية (Chinese)',
+  zho: 'الصينية (Chinese)',
+  chi: 'الصينية (Chinese)',
+  ja: 'اليابانية (Japanese)',
+  jpn: 'اليابانية (Japanese)',
+  ko: 'الكورية (Korean)',
+  kor: 'الكورية (Korean)',
+  hi: 'الهندية (Hindi)',
+  hin: 'الهندية (Hindi)',
+  fa: 'الفارسية (Persian)',
+  per: 'الفارسية (Persian)',
+  fas: 'الفارسية (Persian)',
+  ur: 'الأردية (Urdu)',
+  urd: 'الأردية (Urdu)',
+  pt: 'البرتغالية (Portuguese)',
+  por: 'البرتغالية (Portuguese)'
+};
+
+export function getLanguageDisplayName(code, fallback = '') {
+  if (!code) return fallback;
+  const clean = String(code).toLowerCase().trim();
+  return LANGUAGE_NAMES[clean] || fallback || code.toUpperCase();
+}
+
 // Cache probed file info in memory to eliminate repeated disk / ffprobe overhead
 const probeCache = new Map();
 
@@ -54,6 +97,7 @@ export async function probeMedia(filePath) {
       '-print_format', 'json',
       '-show_format',
       '-show_streams',
+      '-show_chapters',
       filePath
     ], { timeout: 10000 });
 
@@ -89,15 +133,40 @@ export async function probeMedia(filePath) {
 
     const subtitleStreams = (data.streams || [])
       .filter(s => s.codec_type === 'subtitle')
-      .map((s, idx) => ({
-        index: s.index,
-        trackIndex: idx,
-        codec: s.codec_name,
-        language: s.tags?.language || s.tags?.title || `ترجمة ${idx + 1}`,
-        title: s.tags?.title || (s.tags?.language ? s.tags.language.toUpperCase() : `Subtitle ${idx + 1}`),
-        isDefault: s.disposition?.default === 1,
-        isEmbedded: true
-      }));
+      .map((s, idx) => {
+        const langCode = s.tags?.language || '';
+        const rawTitle = s.tags?.title || '';
+        const friendlyName = getLanguageDisplayName(langCode, `ترجمة ${idx + 1}`);
+        const displayTitle = rawTitle
+          ? (langCode && !rawTitle.toLowerCase().includes(langCode.toLowerCase()) ? `${rawTitle} (${friendlyName})` : rawTitle)
+          : friendlyName;
+
+        return {
+          id: `embedded_${s.index}_${idx}`,
+          index: s.index,
+          streamIndex: s.index,
+          trackIndex: idx,
+          codec: s.codec_name,
+          language: langCode || 'ar',
+          title: displayTitle,
+          isDefault: s.disposition?.default === 1,
+          isEmbedded: true
+        };
+      });
+
+    const chapters = (data.chapters || [])
+      .map((c, idx) => {
+        const start = parseFloat(c.start_time);
+        const end = parseFloat(c.end_time);
+        if (isNaN(start)) return null;
+        return {
+          index: idx,
+          start: Math.round(start * 10) / 10,
+          end: isNaN(end) ? null : Math.round(end * 10) / 10,
+          title: (c.tags?.title || '').trim() || `Chapter ${idx + 1}`
+        };
+      })
+      .filter(Boolean);
 
     const result = {
       duration,
@@ -120,7 +189,8 @@ export async function probeMedia(filePath) {
       channels: audioStream?.channels || null,
       sampleRate: audioStream?.sample_rate ? parseInt(audioStream.sample_rate) : null,
       audioTracks: audioStreams,
-      embeddedSubtitles: subtitleStreams
+      embeddedSubtitles: subtitleStreams,
+      chapters
     };
 
     probeCache.set(filePath, result);
@@ -136,7 +206,8 @@ export async function probeMedia(filePath) {
       profile: '',
       audioCodec: null,
       audioTracks: [],
-      embeddedSubtitles: []
+      embeddedSubtitles: [],
+      chapters: []
     };
     probeCache.set(filePath, fallback);
     return fallback;

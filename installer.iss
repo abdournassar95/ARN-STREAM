@@ -5,7 +5,7 @@
 ; ==============================================================================
 
 #define MyAppName "ARN Stream"
-#define MyAppVersion "2.0.2"
+#define MyAppVersion "2.1.0"
 #define MyAppPublisher "ARN Technology"
 #define MyAppURL "https://facebook.com/abdouragab.nassar"
 #define MyAppExeName "ARN_Stream.exe"
@@ -68,7 +68,7 @@ Name: "autostart"; Description: "{cm:TaskAutoStart}"; GroupDescription: "{cm:Add
 Source: "launcher\dist\ARN_Stream.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 ; 2. Embedded Portable Node.js runtime
-Source: "C:\Program Files\nodejs\node.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
+Source: "bin\node.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 
 ; 3. Production Frontend Static Build
 Source: "client\dist\*"; DestDir: "{app}\client\dist"; Flags: ignoreversion recursesubdirs createallsubdirs

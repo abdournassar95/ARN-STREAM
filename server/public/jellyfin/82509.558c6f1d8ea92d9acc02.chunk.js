@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunk=self.webpackChunk||[]).push([[82509],{82509:function(e,s,a){a(77575);var r=a(24468);s.default={buildPeopleCards:function(e,s){s=Object.assign(s||{},{cardLayout:!1,centerText:!0,showTitle:!0,cardFooterAside:"none",showPersonRoleOrType:!0,cardCssClass:"personCard",defaultCardImageIcon:"person"}),r.Ay.buildCards(e,s)}}}}]);

@@ -1,6 +1,6 @@
 {
   "name": "arn-stream-client",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "ARN Stream Frontend Client - Luxury Media Platform by ARN Technology",
   "author": "Abdou Ragab Nassar (ARN Technology)",
   "type": "module",

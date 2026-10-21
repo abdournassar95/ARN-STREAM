@@ -1,23 +1,56 @@
 {
+  "id": "/",
   "name": "ARN Stream",
   "short_name": "ARN Stream",
   "description": "منصة الوسائط المتكاملة — تطوير وبرمجة عبده رجب نصار (ARN Technology)",
+  "lang": "ar",
+  "dir": "rtl",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "fullscreen", "minimal-ui"],
   "background_color": "#0b1120",
   "theme_color": "#e50914",
   "orientation": "any",
+  "prefer_related_applications": false,
   "icons": [
     {
       "src": "/icon.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     },
     {
       "src": "/favicon-64.png",
       "sizes": "64x64",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "الأفلام",
+      "short_name": "أفلام",
+      "url": "/movies",
+      "icons": [{ "src": "/icon.png", "sizes": "512x512", "type": "image/png" }]
+    },
+    {
+      "name": "المسلسلات",
+      "short_name": "مسلسلات",
+      "url": "/series",
+      "icons": [{ "src": "/icon.png", "sizes": "512x512", "type": "image/png" }]
+    },
+    {
+      "name": "الموسيقى",
+      "short_name": "موسيقى",
+      "url": "/music",
+      "icons": [{ "src": "/icon.png", "sizes": "512x512", "type": "image/png" }]
     }
   ],
   "categories": ["entertainment", "music", "video"]

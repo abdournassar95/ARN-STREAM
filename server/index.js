@@ -3,8 +3,9 @@ import cors from 'cors';
 import compression from 'compression';
 import path from 'path';
 import fs from 'fs';
+import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
-import db, { getDataDir, getSetting } from './db.js';
+import db, { getDataDir, getSetting, setSetting } from './db.js';
 
 // Global process-level safety handlers to prevent unhandled crashes
 process.on('uncaughtException', (err) => {
@@ -80,6 +81,10 @@ import databaseRouter from './routes/database.js';
 import liveRouter from './routes/live.js';
 import subtitlesRouter from './routes/subtitles.js';
 import watchPartyRouter from './routes/watch-party.js';
+import syncplayRouter from './routes/syncplay.js';
+import { syncplayManager } from './services/syncplay-manager.js';
+import jellyfinRouter from './routes/jellyfin/router.js';
+import { handleJellyfinSocketConnection } from './routes/jellyfin/socket.js';
 import { optionalAuth, requireAuth, requireAdmin, getInternalKey } from './services/auth.js';
 import { responseCacheMiddleware, invalidateCache } from './middleware/response-cache.js';
 import {
@@ -97,6 +102,49 @@ import dlnaController from './services/dlna-controller.js';
 import { scheduleBackups } from './services/db-backup.js';
 import { scheduleLogRotation } from './services/log-rotation.js';
 
+// Jellyfin-compatible API (served at the server root for jellyfin-web clients)
+const jellyfinApiPrefixes = [
+  '/System',
+  '/Users',
+  '/UserViews',
+  '/Items',
+  '/Shows',
+  '/Artists',
+  '/Playlists',
+  '/Collections',
+  '/Search',
+  '/Genres',
+  '/MusicGenres',
+  '/Persons',
+  '/Studios',
+  '/Movies',
+  '/Trailers',
+  '/Plugins',
+  '/Devices',
+  '/Channels',
+  '/Sessions',
+  '/DisplayPreferences',
+  '/UserSettings',
+  '/Library',
+  '/Branding',
+  '/QuickConnect',
+  '/Localization',
+  '/Startup',
+  '/Videos',
+  '/Audio',
+  '/UserFavoriteItems',
+  '/UserPlayedItems',
+  '/Tasks'
+];
+app.use((req, res, next) => {
+  const requestPath = req.path.toLowerCase();
+  const isJellyfinRequest = jellyfinApiPrefixes.some(
+    (prefix) => requestPath === prefix.toLowerCase() || requestPath.startsWith(`${prefix.toLowerCase()}/`)
+  );
+  if (!isJellyfinRequest) return next();
+  return jellyfinRouter(req, res, next);
+});
+
 // Apply optional auth to attach req.user if token present
 app.use(optionalAuth);
 
@@ -109,6 +157,7 @@ app.use('/api/database', databaseRouter);
 app.use('/api/live', liveRouter);
 app.use('/api/subtitles', subtitlesRouter);
 app.use('/api/watch-party', watchPartyRouter);
+app.use('/api/syncplay', syncplayRouter);
 app.use('/api/library', libraryRouter);
 app.use('/api/libraries', librariesRouter);
 app.use('/api/movies', moviesRouter);
@@ -420,10 +469,137 @@ app.get('/api/search', requireAuth, (req, res) => {
   });
 });
 
-// Scan endpoint
+// Scan & System control endpoints
 import { scanAll } from './scanner/media-scanner.js';
 import { scanImages } from './scanner/image-scanner.js';
 import { cleanMissingFiles, cleanOrphanedData } from './services/database-manager.js';
+
+let currentScanState = {
+  isScanning: false,
+  progress: 0,
+  current: 0,
+  total: 0,
+  currentFile: '',
+  libraryName: '',
+  phase: 'idle',
+  newItems: [],
+  lastScanTime: null,
+  lastScanStats: null
+};
+
+let lastBroadcastTime = 0;
+function notifyScanProgress(info) {
+  const now = Date.now();
+  currentScanState = {
+    ...currentScanState,
+    isScanning: true,
+    progress: info.progress,
+    current: info.current,
+    total: info.total,
+    currentFile: info.currentFile || '',
+    libraryName: info.libraryName || '',
+    phase: info.phase || 'scanning',
+    newCount: info.newCount || 0
+  };
+
+  if (info.progress === 100 || info.progress <= 1 || now - lastBroadcastTime > 80) {
+    lastBroadcastTime = now;
+    broadcastToAll('scan_progress', {
+      progress: info.progress,
+      current: info.current,
+      total: info.total,
+      currentFile: info.currentFile,
+      libraryName: info.libraryName,
+      phase: info.phase,
+      newCount: info.newCount || 0
+    });
+  }
+}
+
+async function executeFullScan(isPeriodic = false) {
+  if (currentScanState.isScanning) {
+    return currentScanState;
+  }
+
+  currentScanState.isScanning = true;
+  currentScanState.progress = 1;
+  currentScanState.phase = 'starting';
+  currentScanState.currentFile = 'بدء فحص ومزامنة المكتبات...';
+  notifyScanProgress({ progress: 1, current: 0, total: 1, currentFile: 'بدء فحص ومزامنة المكتبات...', libraryName: 'كافة المكتبات', phase: 'starting', newCount: 0 });
+
+  try {
+    const mediaStats = await scanAll({ onProgress: notifyScanProgress });
+
+    // Heavy disk image scanning only on initial startup or when new media items were actually found
+    const imageCount = db.prepare('SELECT COUNT(*) as count FROM images').get()?.count || 0;
+    let imageStats = null;
+    if (!isPeriodic || (mediaStats && mediaStats.newItems > 0) || imageCount === 0) {
+      notifyScanProgress({ progress: 98, current: currentScanState.total, total: currentScanState.total, currentFile: 'فحص البوسترات والصور...', libraryName: 'الصور', phase: 'images', newCount: mediaStats?.newItems || 0 });
+      imageStats = await scanImages();
+    }
+
+    notifyScanProgress({ progress: 99, current: currentScanState.total, total: currentScanState.total, currentFile: 'تنظيف السجلات المحذوفة...', libraryName: 'قاعدة البيانات', phase: 'cleaning', newCount: mediaStats?.newItems || 0 });
+    const pruneResults = cleanMissingFiles(false);
+    const orphanResults = cleanOrphanedData();
+
+    // Invalidate cached library/movie/series/music responses
+    invalidateCache('/api/library');
+    invalidateCache('/api/movies');
+    invalidateCache('/api/series');
+    invalidateCache('/api/artists');
+    invalidateCache('/api/albums');
+    invalidateCache('/api/tracks');
+    invalidateCache('/api/collections');
+    invalidateCache('/api/playlists');
+    invalidateCache('/api/libraries');
+
+    currentScanState = {
+      isScanning: false,
+      progress: 100,
+      current: currentScanState.total,
+      total: currentScanState.total,
+      currentFile: 'اكتمل الفحص بنجاح',
+      libraryName: 'كافة المكتبات',
+      phase: 'completed',
+      newItems: mediaStats?.newItemsList || [],
+      lastScanTime: new Date().toISOString(),
+      lastScanStats: mediaStats
+    };
+
+    broadcastToAll('scan_completed', {
+      stats: mediaStats,
+      newItems: mediaStats?.newItemsList || [],
+      count: (mediaStats?.newItemsList || []).length,
+      pruned: pruneResults?.totalMissing || 0
+    });
+
+    if ((mediaStats && mediaStats.newItems > 0) || (pruneResults && pruneResults.totalMissing > 0)) {
+      broadcastToAll('library_updated', {
+        message: 'تم تحديث وتنظيف المكتبة تلقائياً',
+        count: mediaStats?.newItems || 0,
+        pruned: pruneResults?.totalMissing || 0,
+        newItems: mediaStats?.newItemsList || []
+      });
+    }
+
+    return { mediaStats, imageStats, pruneResults, orphanResults };
+  } catch (err) {
+    console.error('[Scanner] Full scan failed:', err);
+    currentScanState.isScanning = false;
+    currentScanState.phase = 'error';
+    broadcastToAll('scan_completed', {
+      error: err.message,
+      stats: null,
+      newItems: []
+    });
+    throw err;
+  }
+}
+
+// GET /api/scan/status -> Current scan state
+app.get('/api/scan/status', (req, res) => {
+  res.json({ data: currentScanState });
+});
 
 app.post('/api/scan', (req, res, next) => {
   const clientIp = req.ip || req.socket?.remoteAddress || req.connection?.remoteAddress || '';
@@ -441,7 +617,6 @@ app.post('/api/scan', (req, res, next) => {
   const isAsync = req.query.async === 'true' || req.headers['x-async'] === 'true' || Boolean(req.user?.isInternal);
 
   if (isAsync) {
-    // Respond immediately to prevent HTTP client timeouts (e.g. desktop tray icon)
     res.json({
       data: {
         status: 'started',
@@ -449,59 +624,47 @@ app.post('/api/scan', (req, res, next) => {
       }
     });
 
-    // Run scanning asynchronously in background
-    (async () => {
-      try {
-        await scanAll();
-        await scanImages();
-        cleanMissingFiles(false);
-        cleanOrphanedData();
-
-        invalidateCache('/api/library');
-        invalidateCache('/api/movies');
-        invalidateCache('/api/series');
-        invalidateCache('/api/artists');
-        invalidateCache('/api/albums');
-        invalidateCache('/api/tracks');
-        invalidateCache('/api/collections');
-        invalidateCache('/api/playlists');
-        invalidateCache('/api/libraries');
-      } catch (err) {
-        console.error('[Scan] Background scan error:', err.message);
-      }
-    })();
+    executeFullScan(false).catch(err => {
+      console.error('[Scan] Background scan error:', err.message);
+    });
     return;
   }
 
   try {
-    const mediaStats = await scanAll();
-    const imageStats = await scanImages();
-    const pruneResults = cleanMissingFiles(false);
-    const orphanResults = cleanOrphanedData();
-
-    // Invalidate all cached library/movie/series/music responses
-    invalidateCache('/api/library');
-    invalidateCache('/api/movies');
-    invalidateCache('/api/series');
-    invalidateCache('/api/artists');
-    invalidateCache('/api/albums');
-    invalidateCache('/api/tracks');
-    invalidateCache('/api/collections');
-    invalidateCache('/api/playlists');
-    invalidateCache('/api/libraries');
-
+    const results = await executeFullScan(false);
     res.json({ 
       data: { 
-        media: mediaStats, 
-        images: imageStats,
-        pruned: pruneResults,
-        orphans: orphanResults
+        media: results.mediaStats, 
+        images: results.imageStats,
+        pruned: results.pruneResults,
+        orphans: results.orphanResults,
+        newItems: results.mediaStats?.newItemsList || []
       },
       message: 'تم فحص المكتبات وتحديث وتنظيف قاعدة البيانات بنجاح.'
     });
   } catch (e) {
     res.status(500).json({ error: { code: 'SCAN_FAILED', message: e.message } });
   }
+});
+
+// POST /api/system/restart -> Graceful restart of ARN Stream
+app.post('/api/system/restart', requireAdmin, (req, res) => {
+  res.json({ success: true, message: 'جاري إعادة تشغيل الخادم الآن...' });
+  setTimeout(() => {
+    console.log('[System] Admin requested restart. Spawning child process and terminating current instance...');
+    try {
+      const child = spawn(process.argv[0], process.argv.slice(1), {
+        cwd: process.cwd(),
+        detached: true,
+        stdio: 'inherit',
+        env: process.env
+      });
+      child.unref();
+    } catch (err) {
+      console.error('[System] Error spawning restart process:', err.message);
+    }
+    process.exit(0);
+  }, 600);
 });
 
 // Metadata TMDB / MusicBrainz (user-triggered)
@@ -550,6 +713,44 @@ app.get('/api/metadata/musicbrainz/search', requireAdmin, async (req, res) => {
 });
 
 app.get('/api/health', (req, res) => res.json({ data: { status: 'ok', uptime: process.uptime() } }));
+
+// Serve the Jellyfin web client (built output) under /jellyfin
+const jellyfinDistCandidates = [
+  process.env.JELLYFIN_WEB_DIST,
+  path.join(__dirname, 'public', 'jellyfin'),
+  path.join(__dirname, '..', 'client', 'jellyfin'),
+  path.join(__dirname, '..', 'jellyfin-web', 'dist'),
+  path.join(process.cwd(), 'jellyfin-web', 'dist')
+].filter(Boolean);
+const jellyfinDist = jellyfinDistCandidates.find(candidate => fs.existsSync(path.join(candidate, 'index.html')));
+
+if (jellyfinDist) {
+  console.log(`Serving Jellyfin web client from: ${jellyfinDist}`);
+  app.use('/jellyfin', express.static(jellyfinDist, {
+    index: false,
+    maxAge: '1y',
+    immutable: true,
+    setHeaders: (res, filePath) => {
+      const name = path.basename(filePath);
+      if (filePath.endsWith('.html') || name === 'config.json' || name === 'manifest.json' || name === 'serviceworker.js') {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      }
+    }
+  }));
+  app.get(['/jellyfin', '/jellyfin/*'], (req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.sendFile(path.join(jellyfinDist, 'index.html'));
+  });
+} else {
+  app.get(['/jellyfin', '/jellyfin/*'], (req, res) => {
+    res.status(503).json({
+      error: {
+        code: 'JELLYFIN_WEB_NOT_FOUND',
+        message: 'Jellyfin web build not found. Place the built jellyfin-web dist folder in server/public/jellyfin or set JELLYFIN_WEB_DIST.'
+      }
+    });
+  });
+}
 
 // Serve client in production
 const possibleDistPaths = [
@@ -640,57 +841,42 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
   console.log('💾 Automated database backup scheduled (every 24h)');
   scheduleLogRotation();
 
-  let isScanning = false;
-  const runBackgroundScan = async (isPeriodic = false) => {
-    if (isScanning) return;
-    isScanning = true;
-    console.log('[Scanner] Running background scan & library auto-cleanup...');
+  const runDailyScanIfNeeded = async (triggerType = 'startup') => {
     try {
-      // 1. Scan and register new or moved media files
-      const mediaStats = await scanAll();
+      const lastScanStr = getSetting('last_auto_scan_time', null);
+      const now = Date.now();
+      const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
-      // OPTIMIZATION: Only run heavy disk image scanning on initial startup or when new media items were actually found
-      const imageCount = db.prepare('SELECT COUNT(*) as count FROM images').get()?.count || 0;
-      if (!isPeriodic || (mediaStats && mediaStats.newItems > 0) || imageCount === 0) {
-        await scanImages();
+      if (lastScanStr) {
+        const lastScanDate = new Date(lastScanStr).getTime();
+        const diffMs = now - lastScanDate;
+        if (!isNaN(diffMs) && diffMs < ONE_DAY_MS) {
+          const hoursLeft = Math.max(1, Math.round((ONE_DAY_MS - diffMs) / (1000 * 60 * 60)));
+          console.log(`[Scanner] تم تجاوز الفحص التلقائي عند (${triggerType}): آخر فحص تم في ${new Date(lastScanStr).toLocaleString('ar-EG')} (متبقي ${hoursLeft} ساعة تقريباً على الفحص اليومي القادم).`);
+          return;
+        }
       }
 
-      // 2. Comprehensive check and cleanup of missing / deleted / moved files
-      const pruneResults = cleanMissingFiles(false);
-      const orphanResults = cleanOrphanedData();
-
-      if (pruneResults && pruneResults.totalMissing > 0) {
-        console.log(`[Auto-Prune] Cleaned ${pruneResults.totalMissing} missing/deleted files (${pruneResults.movies.length} movies, ${pruneResults.episodes.length} episodes, ${pruneResults.tracks.length} tracks).`);
-      }
-      if (orphanResults && orphanResults.totalCleaned > 0) {
-        console.log(`[Auto-Prune] Cleaned ${orphanResults.totalCleaned} orphaned metadata records.`);
-      }
-
-      console.log('[Scanner] Background scan and library auto-cleanup complete');
-      if ((mediaStats && mediaStats.newItems > 0) || (pruneResults && pruneResults.totalMissing > 0)) {
-        console.log(`[Scanner] Library changes detected. Broadcasting library_updated event.`);
-        broadcastToAll('library_updated', { 
-          message: 'تم تحديث وتنظيف المكتبة تلقائياً', 
-          count: mediaStats?.newItems || 0,
-          pruned: pruneResults?.totalMissing || 0 
-        });
-      }
+      console.log(`[Scanner] بدء الفحص التلقائي اليومي الشامل (${triggerType})...`);
+      await executeFullScan(true);
+      setSetting('last_auto_scan_time', new Date().toISOString());
+      console.log('✅ [Scanner] اكتمل الفحص التلقائي اليومي بنجاح وتم تحديث الطابع الزمني.');
     } catch (e) {
-      console.error('[Scanner] Background scan & cleanup failed:', e.message);
-    } finally {
-      isScanning = false;
+      console.error('[Scanner] فشل الفحص التلقائي اليومي:', e.message);
     }
   };
 
-  // Initial comprehensive scan and cleanup on startup (delayed slightly to let server start smoothly)
-  setTimeout(() => runBackgroundScan(false), 3500);
+  // Delayed startup check (skips if scanned in the last 24 hours)
+  setTimeout(() => runDailyScanIfNeeded('startup'), 6000);
 
-  // Periodic scan and auto-cleanup: Every 6 hours instead of every 30 minutes to eliminate disk and CPU spikes
-  setInterval(() => runBackgroundScan(true), 6 * 3600 * 1000);
+  // Hourly periodic check to trigger the 24-hour daily scan precisely when due
+  setInterval(() => runDailyScanIfNeeded('daily_schedule'), 60 * 60 * 1000);
 });
 
 // Real-Time High-Speed WebSocket Server for PlayTo / Remote Control (< 5ms response time)
-const wss = new WebSocketServer({ server, path: '/ws/handoff', maxPayload: 16384 });
+const wss = new WebSocketServer({ noServer: true, maxPayload: 16384 });
+const jellyfinWss = new WebSocketServer({ noServer: true, maxPayload: 16384 });
+const syncplayWss = new WebSocketServer({ noServer: true, maxPayload: 32768 });
 
 wss.on('connection', (ws, req) => {
   try {
@@ -706,6 +892,64 @@ wss.on('connection', (ws, req) => {
     });
   } catch (err) {
     console.warn('[WS Connection Error]:', err.message);
+  }
+});
+
+// ARN SyncPlay WebSocket Handler (Real-Time Synchronized Group Viewing & Live Chat)
+syncplayWss.on('connection', (ws, req) => {
+  try {
+    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    const roomId = url.searchParams.get('roomId');
+    const userId = url.searchParams.get('userId') || `guest-${Date.now()}`;
+    const deviceId = url.searchParams.get('deviceId');
+    const connectionId = url.searchParams.get('connectionId');
+    const username = decodeURIComponent(url.searchParams.get('username') || 'ضيف ARN');
+    const avatar = url.searchParams.get('avatar') || null;
+
+    if (!roomId) {
+      ws.close(4001, 'roomId required');
+      return;
+    }
+
+    const joined = syncplayManager.joinRoom(roomId.toUpperCase(), ws, { id: userId, deviceId, connectionId, username, avatar });
+    if (!joined) return;
+
+    ws.on('message', (rawData) => {
+      syncplayManager.handleMessage(ws, rawData);
+    });
+
+    ws.on('close', () => {
+      syncplayManager.leaveRoom(ws);
+    });
+
+    ws.on('error', (err) => {
+      console.warn('[SyncPlay WS Error]:', err.message);
+      syncplayManager.leaveRoom(ws);
+    });
+  } catch (err) {
+    console.warn('[SyncPlay Connection Error]:', err.message);
+  }
+});
+
+jellyfinWss.on('connection', handleJellyfinSocketConnection);
+
+server.on('upgrade', (req, socket, head) => {
+  let pathname;
+  try {
+    pathname = new URL(req.url, `http://${req.headers.host || 'localhost'}`).pathname;
+  } catch {
+    socket.destroy();
+    return;
+  }
+
+  if (pathname === '/ws/handoff') {
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+  } else if (pathname === '/ws/syncplay') {
+    syncplayWss.handleUpgrade(req, socket, head, (ws) => syncplayWss.emit('connection', ws, req));
+  } else if (pathname === '/socket' || pathname === '/socket/') {
+    jellyfinWss.handleUpgrade(req, socket, head, (ws) => jellyfinWss.emit('connection', ws, req));
+  } else {
+    socket.destroy();
   }
 });
 

@@ -15,6 +15,7 @@ import RemoteControlBanner from './components/shared/RemoteControlBanner.jsx';
 import FullRemoteControlModal from './components/shared/FullRemoteControlModal.jsx';
 import MiniPlayer from './components/music/MiniPlayer.jsx';
 import SplashScreen from './components/shared/SplashScreen.jsx';
+import PWAInstallPrompt from './components/shared/PWAInstallPrompt.jsx';
 import { syncAuthCookie } from './api/client.js';
 
 syncAuthCookie();
@@ -209,6 +210,7 @@ export default function App() {
           <RemoteControlBanner />
           <FullRemoteControlModal />
           <SplashScreen />
+          <PWAInstallPrompt />
         </ErrorBoundary>
       </BrowserRouter>
     </QueryClientProvider>

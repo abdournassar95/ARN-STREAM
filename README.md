@@ -5,7 +5,7 @@
 
 ![ARN Stream Logo](launcher/assets/icon.png)
 
-**الإصدار:** v2.0.2 • **المطور:** عبده رجب نصار • **الشركة:** ARN Technology  
+**الإصدار:** v2.0.3 • **المطور:** عبده رجب نصار • **الشركة:** ARN Technology  
 **الهوية:** تصميم عصري فاخر (Dark Glassmorphic UI) مع أداء عالي وسرعة استجابة فائقة.
 
 [![Node.js](https://img.shields.io/badge/Node.js-v18%2B-green.svg?logo=node.js)](https://nodejs.org/)
@@ -124,7 +124,7 @@ npm run install:all
 ```
 
 ينتج عن السكربت:
-1. توليد حزمة التثبيت الذاتية في `dist/setup/ARN_Stream_Setup_v2.0.2.exe`.
+1. توليد حزمة التثبيت الذاتية في `dist/setup/ARN_Stream_Setup_v2.0.3.exe`.
 2. حزمة ZIP مضغوطة قابلة للتوزيع المباشر.
 3. مزامنة تلقائية للإصدار في مسار الإصدارات: `E:\اصداراتي`.
 

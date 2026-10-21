@@ -4,9 +4,10 @@ import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { changePasswordApi } from '../../api/client';
+import client from '../../api/client';
 import EditProfileModal from './EditProfileModal';
 import { 
-  User, Shield, LogOut, KeyRound, Activity, ChevronDown, Check, AlertCircle, X, Sparkles, Play
+  User, Shield, LogOut, KeyRound, Activity, ChevronDown, Check, AlertCircle, X, Sparkles, Play, RotateCcw
 } from 'lucide-react';
 
 export default function UserMenu({ isSidebar = false }) {
@@ -19,7 +20,36 @@ export default function UserMenu({ isSidebar = false }) {
   const [open, setOpen] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showRestartConfirm, setShowRestartConfirm] = useState(false);
+  const [isRestarting, setIsRestarting] = useState(false);
   const menuRef = useRef(null);
+
+  const handleRestartServer = async () => {
+    setShowRestartConfirm(false);
+    setIsRestarting(true);
+    try {
+      await client.post('/system/restart');
+    } catch (e) {
+      console.warn('[Restart] Trigger sent:', e.message);
+    }
+
+    let attempts = 0;
+    const interval = setInterval(async () => {
+      attempts++;
+      try {
+        const res = await fetch('/api/libraries?non_empty=true', { cache: 'no-store' });
+        if (res.ok) {
+          clearInterval(interval);
+          setIsRestarting(false);
+          window.location.reload();
+        }
+      } catch (err) {}
+      if (attempts > 30) {
+        clearInterval(interval);
+        window.location.reload();
+      }
+    }, 1500);
+  };
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -69,9 +99,17 @@ export default function UserMenu({ isSidebar = false }) {
         }
       >
         {/* Avatar / Icon */}
-        <div className={`w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center text-white font-bold text-xs shadow-md shadow-cyan-500/20 shrink-0 ${isSidebar ? 'mx-auto group-hover/sidebar:mx-0' : ''}`}>
+        <div 
+          className={`w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center text-white font-bold text-xs shadow-md shadow-cyan-500/20 shrink-0 overflow-hidden ${isSidebar ? 'mx-auto group-hover/sidebar:mx-0' : ''}`}
+          style={{ width: 32, height: 32, minWidth: 32, minHeight: 32, maxWidth: 32, maxHeight: 32, borderRadius: '9999px' }}
+        >
           {user.avatar ? (
-            <img src={user.avatar} alt={user.display_name} className="w-full h-full rounded-full object-cover" />
+            <img 
+              src={user.avatar} 
+              alt={user.display_name || user.username} 
+              className="w-full h-full rounded-full object-cover" 
+              style={{ width: '100%', height: '100%', maxWidth: '100%', maxHeight: '100%', objectFit: 'cover', borderRadius: '9999px' }}
+            />
           ) : (
             <span>{(user.display_name || user.username).charAt(0).toUpperCase()}</span>
           )}
@@ -162,6 +200,22 @@ export default function UserMenu({ isSidebar = false }) {
               </Link>
             )}
 
+            {isAdmin() && (
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  setShowRestartConfirm(true);
+                }}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:text-amber-400 transition ${isRtl ? 'text-right' : 'text-left'} ${
+                  isDark ? 'text-slate-200 hover:bg-white/10' : 'text-text hover:bg-surfaceHover'
+                }`}
+              >
+                <RotateCcw size={16} className="text-amber-400" />
+                <span>{isRtl ? 'إعادة تشغيل الخادم' : 'Restart Server'}</span>
+              </button>
+            )}
+
             <button
               onClick={() => {
                 setOpen(false);
@@ -194,6 +248,64 @@ export default function UserMenu({ isSidebar = false }) {
       {/* Change Password Modal */}
       {showPasswordModal && (
         <ChangePasswordModal onClose={() => setShowPasswordModal(false)} />
+      )}
+
+      {/* Restart Confirmation Modal */}
+      {showRestartConfirm && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-fadeIn">
+          <div className={`w-full max-w-sm rounded-3xl border shadow-2xl p-6 text-center ${
+            isDark ? 'bg-slate-900 border-white/15 text-white' : 'bg-surface border-border text-text'
+          }`}>
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto mb-4 border border-amber-500/30">
+              <RotateCcw size={24} />
+            </div>
+            <h3 className="text-base font-bold mb-2">
+              {isRtl ? 'إعادة تشغيل الخادم' : 'Restart Server'}
+            </h3>
+            <p className="text-xs text-white/70 dark:text-white/70 mb-6 leading-relaxed">
+              {isRtl 
+                ? 'هل أنت متأكد من رغبتك في إعادة تشغيل خادم ARN Stream؟ سيتم إعادة تشغيل كافة الخدمات تلقائياً.' 
+                : 'Are you sure you want to restart ARN Stream server? All background services will reload automatically.'}
+            </p>
+            <div className="flex items-center gap-3 justify-center">
+              <button
+                type="button"
+                onClick={() => setShowRestartConfirm(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-white/60 hover:text-white hover:bg-white/10 transition"
+              >
+                {isRtl ? 'إلغاء' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={handleRestartServer}
+                className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-lg shadow-amber-500/20 transition"
+              >
+                {isRtl ? 'إعادة التشغيل الآن' : 'Restart Now'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Restarting Overlay */}
+      {isRestarting && (
+        <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl text-white select-none animate-fadeIn">
+          <div className="w-16 h-16 rounded-3xl bg-amber-500/20 text-amber-400 flex items-center justify-center mb-6 border border-amber-500/30 shadow-[0_0_30px_rgba(245,158,11,0.3)]">
+            <RotateCcw size={32} className="animate-spin" />
+          </div>
+          <h2 className="text-xl font-black mb-2 tracking-tight">
+            {isRtl ? 'جاري إعادة تشغيل خادم ARN Stream...' : 'Restarting ARN Stream Server...'}
+          </h2>
+          <p className="text-xs text-white/60 max-w-sm text-center leading-relaxed mb-6">
+            {isRtl 
+              ? 'يرجى الانتظار، جاري إعادة تشغيل الخدمات والاتصال التلقائي بالخادم فور اكتمال الإقلاع...' 
+              : 'Please wait, reloading background services and reconnecting automatically as soon as online...'}
+          </p>
+          <div className="flex items-center gap-2 text-xs font-mono text-amber-400/80">
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+            <span>{isRtl ? 'جاري الفحص وإعادة الاتصال...' : 'Checking server status...'}</span>
+          </div>
+        </div>
       )}
     </div>
   );

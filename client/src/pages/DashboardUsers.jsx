@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
@@ -284,8 +285,8 @@ export default function DashboardUsers() {
       )}
 
       {/* Delete Confirmation Modal */}
-      {deleteConfirmUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn" dir={isRtl ? 'rtl' : 'ltr'}>
+      {deleteConfirmUser && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn" dir={isRtl ? 'rtl' : 'ltr'}>
           <div className="w-full max-w-sm border rounded-3xl p-6 shadow-2xl text-center" style={{ background: 'var(--dash-modal-bg)', borderColor: 'rgba(239,68,68,0.2)' }}>
             <div className="w-12 h-12 rounded-2xl bg-red-500/20 text-red-400 flex items-center justify-center mx-auto mb-4 border border-red-500/30">
               <Trash2 size={24} />
@@ -313,7 +314,8 @@ export default function DashboardUsers() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -418,41 +420,50 @@ function UserFormModal({ mode = 'create', user = null, libraries = [], onClose, 
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn" dir={isRtl ? 'rtl' : 'ltr'}>
-      <div className="w-full max-w-lg border rounded-3xl p-6 md:p-8 shadow-2xl relative max-h-[90vh] overflow-y-auto" style={{ background: 'var(--dash-modal-bg)', borderColor: 'var(--dash-input-border)' }}>
-        <button
-          onClick={onClose}
-          className={`absolute top-5 ${isRtl ? 'left-5' : 'right-5'} p-1 rounded-full hover:bg-cyan-500/10 transition`}
-          style={{ color: 'var(--dash-muted-text)' }}
-        >
-          <X size={20} />
-        </button>
-
-        <div className="flex items-center gap-3 mb-6">
-          <div className="p-3 rounded-2xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
-            {mode === 'create' ? <UserPlus size={22} /> : <Edit size={22} />}
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 md:p-6 bg-black/80 backdrop-blur-md animate-fadeIn" dir={isRtl ? 'rtl' : 'ltr'}>
+      <form 
+        onSubmit={handleSubmit}
+        className="w-full max-w-2xl border rounded-3xl shadow-2xl relative max-h-[90vh] flex flex-col overflow-hidden" 
+        style={{ background: 'var(--dash-modal-bg)', borderColor: 'var(--dash-input-border)' }}
+      >
+        {/* Fixed Header */}
+        <div className="px-6 py-4 sm:py-5 border-b shrink-0 flex items-center justify-between" style={{ borderColor: 'var(--dash-input-border)' }}>
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
+              {mode === 'create' ? <UserPlus size={20} /> : <Edit size={20} />}
+            </div>
+            <div>
+              <h3 className="text-base font-bold" style={headingStyle}>
+                {mode === 'create' ? (isRtl ? 'إضافة مستخدم جديد' : 'Add New User') : (isRtl ? `تعديل المستخدم: @${user.username}` : `Edit User: @${user.username}`)}
+              </h3>
+              <p className="text-xs" style={mutedStyle}>
+                {mode === 'create' 
+                  ? (isRtl ? 'أنشئ حساباً جديداً وحدد الرتبة والمكتبات المتاحة له' : 'Create a new account, assign a role and accessible libraries')
+                  : (isRtl ? 'تعديل الصلاحيات والمكتبات المتاحة أو إعادة تعيين كلمة المرور' : 'Update permissions, accessible libraries, or reset password')}
+              </p>
+            </div>
           </div>
-          <div>
-            <h3 className="text-base font-bold" style={headingStyle}>
-              {mode === 'create' ? (isRtl ? 'إضافة مستخدم جديد' : 'Add New User') : (isRtl ? `تعديل المستخدم: @${user.username}` : `Edit User: @${user.username}`)}
-            </h3>
-            <p className="text-xs" style={mutedStyle}>
-              {mode === 'create' 
-                ? (isRtl ? 'أنشئ حساباً جديداً وحدد الرتبة والمكتبات المتاحة له' : 'Create a new account, assign a role and accessible libraries')
-                : (isRtl ? 'تعديل الصلاحيات والمكتبات المتاحة أو إعادة تعيين كلمة المرور' : 'Update permissions, accessible libraries, or reset password')}
-            </p>
-          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded-full hover:bg-cyan-500/10 transition"
+            style={{ color: 'var(--dash-muted-text)' }}
+            title={isRtl ? 'إغلاق' : 'Close'}
+          >
+            <X size={20} />
+          </button>
         </div>
 
-        {errorMsg && (
-          <div className="mb-4 p-3 rounded-xl bg-red-500/15 border border-red-500/30 text-red-400 text-xs font-semibold flex items-center gap-2">
-            <AlertCircle size={16} className="shrink-0" />
-            <span>{errorMsg}</span>
-          </div>
-        )}
+        {/* Scrollable Form Body */}
+        <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4">
+          {errorMsg && (
+            <div className="p-3 rounded-xl bg-red-500/15 border border-red-500/30 text-red-400 text-xs font-semibold flex items-center gap-2">
+              <AlertCircle size={16} className="shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
           {/* Avatar Selection */}
           <div>
             <label className="block text-xs font-semibold mb-1.5" style={bodyStyle}>
@@ -465,7 +476,7 @@ function UserFormModal({ mode = 'create', user = null, libraries = [], onClose, 
             />
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Username */}
             <div>
               <label className="block text-xs font-semibold mb-1" style={bodyStyle}>{isRtl ? 'اسم الدخول (Username)' : 'Username'}</label>
@@ -514,7 +525,7 @@ function UserFormModal({ mode = 'create', user = null, libraries = [], onClose, 
           {/* Role Selection */}
           <div>
             <label className="block text-xs font-semibold mb-2" style={bodyStyle}>{isRtl ? 'رتبة المستخدم (Role)' : 'User Role'}</label>
-            <div className="grid grid-cols-3 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
               {[
                 { id: 'user', label: isRtl ? 'مستخدم عادي' : 'Standard User', desc: isRtl ? 'مشاهدة ومفضلات وقوائم خاصة' : 'Watch, personal favorites & playlists' },
                 { id: 'admin', label: isRtl ? 'مدير النظام' : 'Administrator', desc: isRtl ? 'صلاحيات كاملة ولوحة تحكم' : 'Full access & dashboard control' },
@@ -560,7 +571,7 @@ function UserFormModal({ mode = 'create', user = null, libraries = [], onClose, 
             </div>
 
             {!allLibraries && (
-              <div className="grid grid-cols-2 gap-2 mt-2 p-3 rounded-xl border max-h-36 overflow-y-auto" style={{ background: cardInnerBg, borderColor: 'var(--dash-input-border)' }}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2 p-3 rounded-xl border max-h-36 overflow-y-auto" style={{ background: cardInnerBg, borderColor: 'var(--dash-input-border)' }}>
                 {libraries.map((lib) => {
                   const isSelected = allowedLibraries.includes(lib.id);
                   return (
@@ -592,7 +603,7 @@ function UserFormModal({ mode = 'create', user = null, libraries = [], onClose, 
             )}
           </div>
 
-          {/* Extra Feature Permissions (Downloads & Casting) */}
+          {/* Extra Feature Permissions (Downloads & Casting & Login Display) */}
           <div className="pt-3 border-t space-y-2.5" style={{ borderColor: 'var(--dash-input-border)' }}>
             <div className="flex items-center justify-between">
               <label className="text-xs font-semibold flex items-center gap-1.5" style={bodyStyle}>
@@ -689,39 +700,40 @@ function UserFormModal({ mode = 'create', user = null, libraries = [], onClose, 
               </label>
             </div>
           </div>
+        </div>
 
-          {/* Form Actions */}
-          <div className="flex items-center justify-end gap-3 pt-4 border-t" style={{ borderColor: 'var(--dash-input-border)' }}>
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 rounded-xl text-xs font-semibold hover:opacity-80 transition"
-              style={mutedStyle}
-            >
-              {isRtl ? 'إلغاء' : 'Cancel'}
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs shadow-lg shadow-cyan-500/20 transition disabled:opacity-60 flex items-center gap-1.5"
-            >
-              {submitting ? (
-                isRtl ? 'جاري الحفظ...' : 'Saving...'
-              ) : mode === 'create' ? (
-                <>
-                  <UserPlus size={16} />
-                  <span>{isRtl ? 'إنشاء المستخدم' : 'Create User'}</span>
-                </>
-              ) : (
-                <>
-                  <Check size={16} />
-                  <span>{isRtl ? 'حفظ التعديلات' : 'Save Changes'}</span>
-                </>
-              )}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        {/* Fixed Footer with Actions */}
+        <div className="px-6 py-4 border-t shrink-0 flex items-center justify-end gap-3 bg-black/20" style={{ borderColor: 'var(--dash-input-border)' }}>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2.5 rounded-xl text-xs font-semibold hover:opacity-80 transition"
+            style={mutedStyle}
+          >
+            {isRtl ? 'إلغاء' : 'Cancel'}
+          </button>
+          <button
+            type="submit"
+            disabled={submitting}
+            className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs shadow-lg shadow-cyan-500/20 transition disabled:opacity-60 flex items-center gap-1.5"
+          >
+            {submitting ? (
+              isRtl ? 'جاري الحفظ...' : 'Saving...'
+            ) : mode === 'create' ? (
+              <>
+                <UserPlus size={16} />
+                <span>{isRtl ? 'إنشاء المستخدم' : 'Create User'}</span>
+              </>
+            ) : (
+              <>
+                <Check size={16} />
+                <span>{isRtl ? 'حفظ التعديلات' : 'Save Changes'}</span>
+              </>
+            )}
+          </button>
+        </div>
+      </form>
+    </div>,
+    document.body
   );
 }

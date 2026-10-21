@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunk=self.webpackChunk||[]).push([[48008],{15627:function(e){e.exports=JSON.parse('{"Books":"Libres","Artists":"Artistas","Collections":"Collecciones","Folders":"Dorsièrs","Favorites":"Favorits","HeaderContinueWatching":"Contunhar de regardar","Movies":"Filmes","Default":"Defaut","Genres":"Genres"}')}}]);

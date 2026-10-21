@@ -15,6 +15,11 @@ export default defineConfig({
         changeOrigin: true,
         ws: true
       },
+      '/ws': {
+        target: 'http://localhost:8096',
+        changeOrigin: true,
+        ws: true
+      },
       '/stream': {
         target: 'http://localhost:8096',
         changeOrigin: true

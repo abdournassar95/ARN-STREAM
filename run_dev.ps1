@@ -1,10 +1,10 @@
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+﻿[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 # Ensure Administrator privileges so previous elevated processes on 8096 can be killed
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
     Write-Host "[i] جاري طلب صلاحيات المسؤول لتحرير المنافذ وبدء بيئة التطوير..." -ForegroundColor Yellow
-    $argList = @("-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PSCommandPath)
+    $argList = @("-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$PSCommandPath`"")
     try {
         Start-Process powershell.exe -ArgumentList $argList -Verb RunAs
     } catch {
@@ -38,6 +38,7 @@ Write-Host "[2/3] تحرير المنفذين 8096 و 5173..." -ForegroundColor 
 Start-Sleep -Milliseconds 800
 
 $workspace = $PSScriptRoot
+if (-not $workspace) { $workspace = Split-Path -Parent $MyInvocation.MyCommand.Definition }
 $serverDir = Join-Path $workspace "server"
 $clientDir = Join-Path $workspace "client"
 

@@ -4,16 +4,19 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { fetchLanding } from '../api/client';
 import GlassCarousel from '../components/shared/GlassCarousel';
+import ContinueWatchingHub from '../components/shared/ContinueWatchingHub';
 import { MovieCard, AlbumCard } from '../components/shared/Card';
 import EditLibraryCoversModal from '../components/modals/EditLibraryCoversModal';
 import EditLiveTvCoversModal, { DEFAULT_LIVE_TV_COVERS } from '../components/modals/EditLiveTvCoversModal';
 import ServerQrModal from '../components/shared/ServerQrModal';
+import JoinWatchPartyModal from '../components/shared/JoinWatchPartyModal';
 import CosmicBackground from '../components/shared/CosmicBackground';
 import { 
-  Film, Music, Play, Tv, BookOpen, Drama, Compass, Sparkles, Folder, 
+  Film, Music, Tv, BookOpen, Drama, Compass, Sparkles, Folder,
   Languages, Settings, FolderPlus, Activity, Palette, MessageCircle, 
   Send, Facebook, Ghost, Moon, Sun, ArrowRight, QrCode,
-  SlidersHorizontal, GripVertical, ChevronLeft, ChevronRight, RotateCcw
+  SlidersHorizontal, GripVertical, ChevronLeft, ChevronRight, RotateCcw,
+  Users
 } from 'lucide-react';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useAuthStore } from '../store/useAuthStore';
@@ -308,7 +311,12 @@ export default function Landing() {
   const { t, i18n } = useTranslation();
   const isArabic = i18n.language === 'ar';
   const queryClient = useQueryClient();
-  const { data, isLoading } = useQuery({ queryKey: ['landing'], queryFn: fetchLanding });
+  const { data, isLoading } = useQuery({ 
+    queryKey: ['landing'], 
+    queryFn: fetchLanding,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true
+  });
 
   const [editingLibrary, setEditingLibrary] = useState(null);
   const [showLiveTvCoversModal, setShowLiveTvCoversModal] = useState(false);
@@ -370,34 +378,7 @@ let currentSections = (homeSectionsOrder || []).map(sec => typeof sec === 'strin
 
       case 'continueWatching':
         if (!data?.continueWatching?.length) return null;
-        return (
-          <div key="continueWatching" className="mt-16 sm:mt-24">
-            <div className="flex items-center justify-between mb-4 px-1">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-sky-500/20 border border-sky-500/30 flex items-center justify-center text-sky-400 shadow-sm">
-                  <Play size={18} fill="currentColor" />
-                </div>
-                <h2 className="text-xl sm:text-2xl font-bold text-text">
-                  {i18n.language === 'ar' ? 'متابعة المشاهدة' : 'Continue Watching'}
-                </h2>
-              </div>
-            </div>
-            <GlassCarousel>
-              {data.continueWatching.filter(item => Boolean(item.poster)).map(item => {
-                const isSeries = item.type === 'series' || item.media_type === 'series';
-                const targetId = isSeries ? (item.mediaId || item.episodeId) : (item.mediaId || item.id);
-                const targetUrl = isSeries ? `/watch/episode/${targetId}?autoPlay=true` : `/watch/movie/${targetId}?autoPlay=true`;
-                return (
-                  <MovieCard 
-                    key={`cw-${item.type || item.media_type}-${item.id || item.mediaId}`} 
-                    item={item} 
-                    to={targetUrl} 
-                  />
-                );
-              })}
-            </GlassCarousel>
-          </div>
-        );
+        return <ContinueWatchingHub key="continueWatching" items={data.continueWatching} />;
 
       case 'continueListening':
         if (!data?.continueListening?.length) return null;
@@ -554,6 +535,7 @@ let currentSections = (homeSectionsOrder || []).map(sec => typeof sec === 'strin
 
   const { isAdmin } = useAuthStore();
   const [showQrModal, setShowQrModal] = useState(false);
+  const [showWatchPartyModal, setShowWatchPartyModal] = useState(false);
 
   const toggleLang = () => i18n.changeLanguage(i18n.language === 'ar' ? 'en' : 'ar');
   const toggleTheme = () => setTheme(theme === 'dark' ? 'light' : 'dark');
@@ -682,10 +664,29 @@ let currentSections = (homeSectionsOrder || []).map(sec => typeof sec === 'strin
       {/* Top */}
       <header className="relative z-50 w-full px-4 sm:px-8 lg:px-12 h-14 sm:h-16 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 sm:gap-2.5">
-          <img src="/favicon.jpg" alt="ARN Technology" className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg object-cover shadow-lg border border-tx/10" />
+          <img 
+            src="/favicon.jpg" 
+            alt="ARN Technology" 
+            className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg object-cover shadow-lg border border-tx/10" 
+            style={{ width: 32, height: 32, maxWidth: 32, maxHeight: 32, objectFit: 'cover' }}
+          />
           <span className="font-bold text-base sm:text-lg tracking-tight text-text drop-shadow-md">ARN Stream</span>
         </div>
         <div className="flex items-center gap-1.5 sm:gap-2.5">
+          {/* Watch Party Quick Connect */}
+          <button
+            type="button"
+            onClick={() => setShowWatchPartyModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface border border-sky-500/30 hover:border-sky-500/60 hover:bg-surfaceHover text-xs sm:text-sm font-bold transition text-sky-400 shadow-sm group"
+            title={isArabic ? 'المشاهدة الجماعية (Watch Party)' : 'Watch Party (SyncPlay)'}
+          >
+            <Users size={14} className="group-hover:scale-110 transition-transform text-sky-400" />
+            <span>{isArabic ? 'المشاهدة الجماعية' : 'Watch Party'}</span>
+            <span className="hidden sm:inline px-1 py-0.2 rounded text-[9px] font-black uppercase bg-sky-500/20 text-sky-300 border border-sky-500/30">
+              SYNC
+            </span>
+          </button>
+
           {/* QR Code Quick Connect for Mobile (Desktop Only) */}
           <button
             type="button"
@@ -1114,6 +1115,12 @@ let currentSections = (homeSectionsOrder || []).map(sec => typeof sec === 'strin
       <ServerQrModal
         isOpen={showQrModal}
         onClose={() => setShowQrModal(false)}
+      />
+
+      {/* Global Join Watch Party Modal (SyncPlay) */}
+      <JoinWatchPartyModal
+        isOpen={showWatchPartyModal}
+        onClose={() => setShowWatchPartyModal(false)}
       />
     </div>
   );

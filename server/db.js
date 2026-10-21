@@ -19,11 +19,51 @@ export function getDataDir() {
 }
 
 const dbPath = path.join(dbDir, 'media.db');
+const cleanCandidate = path.join(dbDir, 'media_clean.db');
+
+// Auto-apply clean repaired database if one was prepared
+if (fs.existsSync(cleanCandidate)) {
+  try {
+    const testClean = new Database(cleanCandidate, { readonly: true });
+    const checkRes = testClean.prepare('PRAGMA integrity_check').get();
+    testClean.close();
+    if (checkRes && checkRes.integrity_check === 'ok') {
+      const backupPath = path.join(dbDir, `media.db.backup_corrupt_${Date.now()}`);
+      if (fs.existsSync(dbPath)) {
+        try { fs.copyFileSync(dbPath, backupPath); } catch {}
+      }
+      try {
+        fs.copyFileSync(cleanCandidate, dbPath);
+        try { fs.unlinkSync(dbPath + '-wal'); } catch {}
+        try { fs.unlinkSync(dbPath + '-shm'); } catch {}
+        try { fs.unlinkSync(cleanCandidate); } catch {}
+        console.log('✅ [Database] تم استبدال قاعدة البيانات بنسخة سليمة ونظيفة 100% بنجاح.');
+      } catch (swapErr) {
+        console.warn('[Database] تنبيه تعذر استبدال ملف قاعدة البيانات فوراً:', swapErr.message);
+      }
+    }
+  } catch (err) {
+    console.warn('[Database] تنبيه فحص النسخة النظيفة:', err.message);
+  }
+}
+
 const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 db.pragma('busy_timeout = 5000');
 db.pragma('synchronous = NORMAL');
 db.pragma('foreign_keys = ON');
+
+// Self-healing: if an index is malformed, reindex automatically
+try {
+  const quick = db.prepare('PRAGMA quick_check').get();
+  if (quick && quick.quick_check !== 'ok') {
+    console.warn('⚠️ [Database] رصد خطأ في فهارس قاعدة البيانات:', quick.quick_check, '- جاري الإصلاح الذاتي عبر REINDEX...');
+    db.exec('REINDEX;');
+    console.log('✅ [Database] تم استرجاع وإعادة بناء الفهارس بنجاح.');
+  }
+} catch (e) {
+  console.warn('[Database] تنبيه الفحص السريع:', e.message);
+}
 
 export function normalizeArabic(text) {
   if (!text || typeof text !== 'string') return '';

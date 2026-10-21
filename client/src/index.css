@@ -100,6 +100,29 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 12p
 }
 .animate-slideUpFullscreen { animation: slideUpFullscreen 0.16s cubic-bezier(0.16, 1, 0.3, 1); }
 
+@keyframes floatEmoji {
+  0% {
+    opacity: 0;
+    transform: translateY(0) scale(0.6) rotate(0deg);
+  }
+  15% {
+    opacity: 1;
+    transform: translateY(-40px) scale(1.15) rotate(-6deg);
+  }
+  75% {
+    opacity: 0.95;
+    transform: translateY(-240px) scale(1) rotate(8deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-380px) scale(0.85) rotate(-10deg);
+  }
+}
+.animate-floatEmoji {
+  animation: floatEmoji ease-out forwards;
+  will-change: transform, opacity;
+}
+
 /* Used by Album.jsx, SeriesDetails.jsx, Player.jsx (floating selection bars) */
 @keyframes scaleUp {
   from { opacity: 0; transform: scale(0.96) translateY(6px); }
@@ -115,6 +138,13 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 12p
   to   { opacity: 1; transform: translateX(0); }
 }
 .animate-slideInRight { animation: slideInRight 0.15s cubic-bezier(0.16, 1, 0.3, 1); }
+
+/* Floating glass cards (Up Next, Skip Intro, Remote banner) */
+@keyframes slideInUp {
+  from { opacity: 0; transform: translateY(24px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.animate-slideInUp { animation: slideInUp 0.32s cubic-bezier(0.16, 1, 0.3, 1); will-change: opacity, transform; }
 
 /* Page transition fade */
 @keyframes pageFade {
@@ -530,5 +560,17 @@ html.light .animate-cosmic-twinkle {
     padding-left: clamp(84px, 6.5vw, 105px) !important;
   }
 }
+
+/* ========================================================================= */
+/* ARN Stream Subtitle Styles (Dynamic WebVTT Cue Customization) */
+/* ========================================================================= */
+::cue {
+  font-family: 'Alexandria', 'Cairo', 'Inter', system-ui, sans-serif !important;
+  font-weight: 600;
+  line-height: 1.4;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.9);
+  white-space: pre-line;
+}
+
 
 

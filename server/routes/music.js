@@ -3,6 +3,7 @@ import db from '../db.js';
 import { requireAdmin, requireAuth } from '../services/auth.js';
 import { scanSingleArtist, scanSingleAlbum } from '../scanner/media-scanner.js';
 import { deleteRecord } from '../services/database-manager.js';
+import { lyricsService } from '../services/lyrics-service.js';
 
 const router = express.Router();
 
@@ -345,20 +346,34 @@ router.post('/tracks/:id/rate', (req, res) => {
 });
 
 // ═══════════════════════════════════════════
-// Lyrics
+// Lyrics & Quran Verses
 // ═══════════════════════════════════════════
-router.get('/tracks/:id/lyrics', (req, res) => {
-  const track = db.prepare(`SELECT id, title, lyrics FROM tracks WHERE id=?`).get(req.params.id);
-  if (!track) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Track not found' } });
-  res.json({ data: { id: track.id, title: track.title, lyrics: track.lyrics || null } });
+router.get('/tracks/:id/lyrics', async (req, res) => {
+  try {
+    const data = await lyricsService.getLyricsForTrack(req.params.id);
+    if (!data) {
+      return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Track not found' } });
+    }
+    res.json({ data });
+  } catch (err) {
+    console.error('[MusicRoutes] Error getting lyrics:', err);
+    res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: err.message } });
+  }
 });
 
 router.put('/tracks/:id/lyrics', (req, res) => {
-  const { lyrics } = req.body;
-  const track = db.prepare(`SELECT * FROM tracks WHERE id=?`).get(req.params.id);
-  if (!track) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Track not found' } });
-  db.prepare(`UPDATE tracks SET lyrics=? WHERE id=?`).run(lyrics || null, req.params.id);
-  res.json({ data: { id: track.id, lyrics: lyrics || null } });
+  try {
+    const { lyrics } = req.body;
+    const track = db.prepare(`SELECT id FROM tracks WHERE id=?`).get(req.params.id);
+    if (!track) {
+      return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Track not found' } });
+    }
+    const result = lyricsService.saveLyrics(req.params.id, lyrics);
+    res.json({ data: result });
+  } catch (err) {
+    console.error('[MusicRoutes] Error saving lyrics:', err);
+    res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: err.message } });
+  }
 });
 
 // ═══════════════════════════════════════════

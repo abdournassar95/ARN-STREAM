@@ -803,7 +803,7 @@ export default function SplashScreen() {
 
       {/* الإصدار والشبكة */}
       <div className="arn-version">
-        <span>V2.0.0</span>
+        <span>V2.0.3</span>
         <span className="sep" />
         <span>LOCAL NETWORK</span>
       </div>

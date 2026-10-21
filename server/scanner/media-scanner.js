@@ -31,11 +31,36 @@ function assignTagsToMedia(genres, mediaType, mediaId) {
   }
 }
 
-export async function scanLibrary(libraryId) {
+export function countAllFiles(libraries) {
+  let count = 0;
+  for (const lib of libraries) {
+    let paths = [];
+    try {
+      paths = lib.paths;
+      if (typeof paths === 'string') paths = JSON.parse(paths);
+    } catch (e) {}
+    if (!Array.isArray(paths)) continue;
+
+    for (const rootPath of paths) {
+      if (!rootPath || !fs.existsSync(rootPath)) continue;
+      try {
+        if (lib.type === 'movies' || lib.type === 'shows') {
+          count += findVideoFilesRecursive(rootPath, 0, 4).length;
+        } else if (lib.type === 'music') {
+          count += findAudioFilesRecursive(rootPath, 0, 5).length;
+        }
+      } catch {}
+    }
+  }
+  return count;
+}
+
+export async function scanLibrary(libraryId, options = {}) {
   const lib = getLibraryById(libraryId);
   if (!lib) throw new Error(`Library ${libraryId} not found`);
 
-  const stats = { movies: 0, series: 0, episodes: 0, artists: 0, albums: 0, tracks: 0, newItems: 0, errors: [] };
+  const { onProgress } = options;
+  const stats = { movies: 0, series: 0, episodes: 0, artists: 0, albums: 0, tracks: 0, newItems: 0, errors: [], newItemsList: [] };
   console.log(`[Scanner] Starting targeted scan for library "${lib.name}" (id: ${lib.id}, type: ${lib.type})`);
 
   let paths = [];
@@ -46,15 +71,45 @@ export async function scanLibrary(libraryId) {
 
   if (!Array.isArray(paths)) return stats;
 
+  const totalFiles = countAllFiles([lib]);
+  const tracker = {
+    processed: 0,
+    total: Math.max(1, totalFiles),
+    notify(filename, libOrPhase, phase) {
+      this.processed++;
+      const currentPhase = phase || (typeof libOrPhase === 'string' ? libOrPhase : lib.type);
+      const progress = Math.min(99, Math.round((this.processed / this.total) * 100));
+      onProgress?.({
+        current: this.processed,
+        total: this.total,
+        progress,
+        currentFile: filename,
+        libraryName: lib.name,
+        phase: currentPhase,
+        newCount: stats.newItemsList.length
+      });
+    }
+  };
+
+  onProgress?.({
+    current: 0,
+    total: tracker.total,
+    progress: 1,
+    currentFile: 'بدء الفحص...',
+    libraryName: lib.name,
+    phase: lib.type,
+    newCount: 0
+  });
+
   for (const rootPath of paths) {
     if (!rootPath) continue;
     try {
       if (lib.type === 'movies') {
-        await scanMovies(stats, rootPath, lib.id);
+        await scanMovies(stats, rootPath, lib, tracker);
       } else if (lib.type === 'shows') {
-        await scanShows(stats, rootPath, lib.id);
+        await scanShows(stats, rootPath, lib, tracker);
       } else if (lib.type === 'music') {
-        await scanMusic(stats, rootPath, lib.id);
+        await scanMusic(stats, rootPath, lib, tracker);
       }
     } catch (e) {
       stats.errors.push(`${lib.type} (${rootPath}): ${e.message}`);
@@ -62,14 +117,54 @@ export async function scanLibrary(libraryId) {
     }
   }
 
+  onProgress?.({
+    current: tracker.total,
+    total: tracker.total,
+    progress: 100,
+    currentFile: 'اكتمل الفحص',
+    libraryName: lib.name,
+    phase: 'completed',
+    newCount: stats.newItemsList.length
+  });
+
   console.log(`[Scanner] Targeted scan complete for "${lib.name}":`, stats);
   return stats;
 }
 
 export async function scanAll(options = {}) {
+  const { onProgress } = options;
   const libraries = getAllLibraries();
-  const stats = { movies: 0, series: 0, episodes: 0, artists: 0, albums: 0, tracks: 0, newItems: 0, errors: [] };
+  const stats = { movies: 0, series: 0, episodes: 0, artists: 0, albums: 0, tracks: 0, newItems: 0, errors: [], newItemsList: [] };
   console.log('[Scanner] Starting full scan for libraries:', libraries.map(l => l.name));
+
+  const totalFiles = countAllFiles(libraries);
+  const tracker = {
+    processed: 0,
+    total: Math.max(1, totalFiles),
+    notify(filename, lib, phase) {
+      this.processed++;
+      const progress = Math.min(99, Math.round((this.processed / this.total) * 100));
+      onProgress?.({
+        current: this.processed,
+        total: this.total,
+        progress,
+        currentFile: filename,
+        libraryName: lib.name,
+        phase,
+        newCount: stats.newItemsList.length
+      });
+    }
+  };
+
+  onProgress?.({
+    current: 0,
+    total: tracker.total,
+    progress: 1,
+    currentFile: 'حصر الملفات والتحضير للبدء...',
+    libraryName: 'كافة المكتبات',
+    phase: 'counting',
+    newCount: 0
+  });
 
   for (const lib of libraries) {
     let paths = [];
@@ -84,11 +179,11 @@ export async function scanAll(options = {}) {
       if (!rootPath) continue;
       try {
         if (lib.type === 'movies') {
-          await scanMovies(stats, rootPath, lib.id);
+          await scanMovies(stats, rootPath, lib, tracker);
         } else if (lib.type === 'shows') {
-          await scanShows(stats, rootPath, lib.id);
+          await scanShows(stats, rootPath, lib, tracker);
         } else if (lib.type === 'music') {
-          await scanMusic(stats, rootPath, lib.id);
+          await scanMusic(stats, rootPath, lib, tracker);
         }
       } catch (e) {
         stats.errors.push(`${lib.type} (${rootPath}): ${e.message}`);
@@ -96,6 +191,16 @@ export async function scanAll(options = {}) {
       }
     }
   }
+
+  onProgress?.({
+    current: tracker.total,
+    total: tracker.total,
+    progress: 100,
+    currentFile: 'اكتمل فحص ومزامنة المكتبات',
+    libraryName: 'كافة المكتبات',
+    phase: 'completed',
+    newCount: stats.newItemsList.length
+  });
 
   console.log('[Scanner] Scan complete', stats);
   return stats;
@@ -121,7 +226,8 @@ function findVideoFilesRecursive(dir, currentDepth = 0, maxDepth = 4) {
   return results;
 }
 
-async function scanMovies(stats, moviesRoot, libraryId) {
+async function scanMovies(stats, moviesRoot, lib, tracker) {
+  const libraryId = lib.id;
   if (!moviesRoot || !fs.existsSync(moviesRoot)) {
     console.log(`[Scanner] Movies path does not exist: "${moviesRoot}"`);
     return;
@@ -145,6 +251,7 @@ async function scanMovies(stats, moviesRoot, libraryId) {
   `);
 
   for (const { fullPath, dir, filename } of videoFiles) {
+    tracker?.notify(filename, lib, 'movies');
     // Yield with micro-delay to keep CPU low and leave system resources free
     await new Promise(r => setTimeout(r, 6));
 
@@ -171,7 +278,20 @@ async function scanMovies(stats, moviesRoot, libraryId) {
     const plot = nfoData?.plot || null;
 
     const existingMovie = db.prepare('SELECT duration, resolution, video_codec, audio_codec FROM movies WHERE path = ?').get(fullPath);
-    if (!existingMovie) stats.newItems++;
+    if (!existingMovie) {
+      stats.newItems++;
+      if (Array.isArray(stats.newItemsList)) {
+        stats.newItemsList.push({
+          type: 'movie',
+          title,
+          year,
+          filename,
+          fullPath,
+          libraryId: lib.id,
+          libraryName: lib.name
+        });
+      }
+    }
 
     let probe = { duration: null, resolution: null, video_codec: null, audio_codec: null };
     if (existingMovie && existingMovie.duration && existingMovie.resolution) {
@@ -404,7 +524,8 @@ export function groupVideosBySeason(showVideos, seriesPath) {
   return seasonsMap;
 }
 
-async function scanShows(stats, showsRoot, libraryId) {
+async function scanShows(stats, showsRoot, lib, tracker) {
+  const libraryId = lib.id;
   if (!showsRoot || !fs.existsSync(showsRoot)) {
     console.log(`[Scanner] Shows path does not exist: "${showsRoot}"`);
     return;
@@ -534,9 +655,10 @@ async function scanShows(stats, showsRoot, libraryId) {
       let nextAutoNumber = 1;
 
       for (let i = 0; i < sVideos.length; i++) {
+        const video = sVideos[i];
+        tracker?.notify(video.filename, lib, 'shows');
         // Yield with micro-delay to prevent CPU spike
         await new Promise(r => setTimeout(r, 6));
-        const video = sVideos[i];
         let epNumber;
 
         if (hasAnyExplicit) {
@@ -582,7 +704,22 @@ async function scanShows(stats, showsRoot, libraryId) {
         }
 
         const existingEpisode = db.prepare('SELECT duration, resolution FROM episodes WHERE path = ?').get(video.fullPath);
-        if (!existingEpisode) stats.newItems++;
+        if (!existingEpisode) {
+          stats.newItems++;
+          if (Array.isArray(stats.newItemsList)) {
+            stats.newItemsList.push({
+              type: 'episode',
+              seriesTitle,
+              seasonNumber: seasonNum,
+              episodeNumber: epNumber,
+              title: epTitle,
+              filename: video.filename,
+              fullPath: video.fullPath,
+              libraryId: lib.id,
+              libraryName: lib.name
+            });
+          }
+        }
 
         let probe = { duration: null, resolution: null };
         if (existingEpisode && existingEpisode.duration && existingEpisode.resolution) {
@@ -718,7 +855,8 @@ function findAudioFilesRecursive(dir, currentDepth = 0, maxDepth = 5) {
   return results;
 }
 
-async function scanMusic(stats, musicRoot, libraryId) {
+async function scanMusic(stats, musicRoot, lib, tracker) {
+  const libraryId = lib.id;
   if (!musicRoot || !fs.existsSync(musicRoot)) {
     console.log(`[Scanner] Music path does not exist: "${musicRoot}"`);
     return;
@@ -731,13 +869,14 @@ async function scanMusic(stats, musicRoot, libraryId) {
   const insertAlbum = db.prepare('INSERT OR IGNORE INTO albums (artist_id, title, year, library_id) VALUES (?, ?, ?, ?)');
   const getAlbum = db.prepare('SELECT id FROM albums WHERE artist_id = ? AND title = ?');
   const insertTrack = db.prepare(`
-    INSERT INTO tracks (album_id, title, track_number, duration, path, library_id)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO tracks (album_id, title, track_number, duration, path, library_id, lyrics)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(path) DO UPDATE SET
       title = COALESCE(excluded.title, tracks.title),
       track_number = COALESCE(excluded.track_number, tracks.track_number),
       duration = COALESCE(excluded.duration, tracks.duration),
-      library_id = excluded.library_id
+      library_id = excluded.library_id,
+      lyrics = COALESCE(excluded.lyrics, tracks.lyrics)
   `);
 
   const audioFiles = findAudioFilesRecursive(musicRoot, 0, 5);
@@ -747,6 +886,7 @@ async function scanMusic(stats, musicRoot, libraryId) {
   let cachedArtists = db.prepare('SELECT id, name FROM artists').all();
 
   for (const { fullPath, dir, filename } of audioFiles) {
+    tracker?.notify(filename, lib, 'music');
     // Yield with micro-delay to prevent CPU spike and keep disk I/O smooth
     await new Promise(r => setTimeout(r, 6));
 
@@ -756,9 +896,9 @@ async function scanMusic(stats, musicRoot, libraryId) {
     let folderArtist = parts.length > 1 ? parts[0] : null;
     let folderAlbum = parts.length > 2 ? parts[1] : null;
 
-    let meta = { title: null, artist: null, album: null, year: null, trackNumber: null, duration: null, picture: null, genres: null };
+    let meta = { title: null, artist: null, album: null, year: null, trackNumber: null, duration: null, picture: null, genres: null, lyrics: null };
     try {
-      const parsed = await mm.parseFile(fullPath, { duration: true });
+      const parsed = await mm.parseFile(fullPath, { duration: false, skipPostHeaders: true });
       meta.title = parsed.common.title;
       meta.artist = parsed.common.artist || parsed.common.albumartist;
       meta.album = parsed.common.album;
@@ -767,6 +907,15 @@ async function scanMusic(stats, musicRoot, libraryId) {
       meta.duration = parsed.format.duration ? Math.round(parsed.format.duration) : null;
       meta.picture = parsed.common.picture?.[0] || null;
       meta.genres = parsed.common.genre || null;
+      if (parsed.common.lyrics) {
+        if (Array.isArray(parsed.common.lyrics)) {
+          meta.lyrics = parsed.common.lyrics.map(l => (typeof l === 'object' && l.text) ? l.text : String(l)).join('\n');
+        } else if (typeof parsed.common.lyrics === 'object' && parsed.common.lyrics.text) {
+          meta.lyrics = parsed.common.lyrics.text;
+        } else {
+          meta.lyrics = String(parsed.common.lyrics);
+        }
+      }
     } catch {}
 
     const parsedFilename = parseTrackFilename(filename);
@@ -788,6 +937,7 @@ async function scanMusic(stats, musicRoot, libraryId) {
         WHERE t.path = ?
       `).get(fullPath);
 
+      const isNew = !existingTrack;
       let artistId = null;
       let albumId = null;
 
@@ -796,7 +946,6 @@ async function scanMusic(stats, musicRoot, libraryId) {
         artistId = existingTrack.artist_id;
         albumId = existingTrack.album_id;
       } else {
-        stats.newItems++;
         // New track: resolve artist carefully
         // A. If folderArtist is present, check if other tracks from the same artist directory belong to an artist
         if (folderArtist) {
@@ -869,8 +1018,35 @@ async function scanMusic(stats, musicRoot, libraryId) {
         db.prepare('UPDATE albums SET library_id = COALESCE(library_id, ?) WHERE id = ?').run(libraryId, albumId);
       }
 
-      insertTrack.run(albumId, trackTitle, trackNum, duration, fullPath, libraryId);
+      let extractedLyrics = null;
+      const lrcPath = fullPath.replace(/\.[^/.]+$/, '.lrc');
+      const txtPath = fullPath.replace(/\.[^/.]+$/, '.txt');
+      if (fs.existsSync(lrcPath)) {
+        try { extractedLyrics = fs.readFileSync(lrcPath, 'utf8'); } catch {}
+      } else if (fs.existsSync(txtPath)) {
+        try { extractedLyrics = fs.readFileSync(txtPath, 'utf8'); } catch {}
+      } else if (meta.lyrics) {
+        extractedLyrics = meta.lyrics;
+      }
+
+      insertTrack.run(albumId, trackTitle, trackNum, duration, fullPath, libraryId, extractedLyrics);
       stats.tracks++;
+
+      if (isNew) {
+        stats.newItems++;
+        if (Array.isArray(stats.newItemsList)) {
+          stats.newItemsList.push({
+            type: 'track',
+            artist: artistName,
+            album: albumTitle,
+            title: trackTitle,
+            filename,
+            fullPath,
+            libraryId: lib.id,
+            libraryName: lib.name
+          });
+        }
+      }
 
       const trackRow = db.prepare('SELECT id FROM tracks WHERE path = ?').get(fullPath);
       if (trackRow && meta.genres) {
@@ -889,6 +1065,7 @@ async function scanMusic(stats, musicRoot, libraryId) {
         }
       }
     } catch (e) {
+      console.error(`[Scanner] Error processing track "${filename}":`, e.message);
       stats.errors.push(e.message);
     }
   }

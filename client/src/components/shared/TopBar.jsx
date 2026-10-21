@@ -21,7 +21,8 @@ import {
   ArrowLeft,
   QrCode,
   SlidersHorizontal,
-  Cast
+  Cast,
+  Users
 } from 'lucide-react';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -30,10 +31,12 @@ import client from '../../api/client';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useDeviceHandoffStore } from '../../store/useDeviceHandoffStore';
+import { useScanStore } from '../../store/useScanStore';
 import PredictiveSearchDropdown from './PredictiveSearchDropdown';
 import { localizeLibraryName } from '../../utils/localization';
 import UserMenu from './UserMenu';
 import ServerQrModal from './ServerQrModal';
+import JoinWatchPartyModal from './JoinWatchPartyModal';
 
 export default function TopBar({ variant = 'movies' }) {
   const { t, i18n } = useTranslation();
@@ -42,7 +45,9 @@ export default function TopBar({ variant = 'movies' }) {
   const isRtl = i18n.language === 'ar';
   
   const [showQrModal, setShowQrModal] = useState(false);
+  const [showWatchPartyModal, setShowWatchPartyModal] = useState(false);
   const { activeRemoteSession, openFullRemote, openCastModal, onlineDevices } = useDeviceHandoffStore();
+  const { isScanning, progress: scanProgress, startScan } = useScanStore();
   
   const [q, setQ] = useState('');
   const [searchSuggestions, setSearchSuggestions] = useState([]);
@@ -56,7 +61,6 @@ export default function TopBar({ variant = 'movies' }) {
   const searchInputRef = useRef(null);
   const debounceTimerRef = useRef(null);
 
-  const [scanning, setScanning] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   
@@ -314,16 +318,8 @@ export default function TopBar({ variant = 'movies' }) {
     }
   };
 
-  const handleScan = async () => {
-    setScanning(true);
-    try { 
-      await client.post('/scan'); 
-      window.location.reload(); 
-    } catch (err) {
-      console.error('Scan error:', err);
-    } finally { 
-      setScanning(false); 
-    }
+  const handleScan = () => {
+    startScan();
   };
 
   return (
@@ -593,6 +589,28 @@ export default function TopBar({ variant = 'movies' }) {
             </span>
           </button>
 
+          {/* 4. المشاهدة الجماعية (Watch Party / SyncPlay) */}
+          <button
+            type="button"
+            onClick={() => setShowWatchPartyModal(true)}
+            className={`flex items-center h-11 px-1 rounded-2xl transition-all duration-200 relative group/nav w-full ${
+              isDark 
+                ? 'text-white/75 hover:text-white hover:bg-white/10' 
+                : 'text-slate-600 hover:text-slate-950 hover:bg-black/5'
+            }`}
+            title={isRtl ? 'المشاهدة الجماعية (Watch Party)' : 'Watch Party (SyncPlay)'}
+          >
+            <div className="w-11 h-11 flex items-center justify-center flex-shrink-0 relative mx-auto group-hover/sidebar:mx-0">
+              <Users size={19} className="text-sky-400 group-hover/sidebar:scale-110 transition-transform" />
+            </div>
+            <span className="opacity-0 w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:w-auto transition-all duration-200 font-semibold text-xs sm:text-sm truncate ms-1.5 whitespace-nowrap overflow-hidden flex items-center gap-1.5">
+              <span>{isRtl ? 'المشاهدة الجماعية' : 'Watch Party'}</span>
+              <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-sky-500/20 text-sky-400 border border-sky-500/30">
+                SYNC
+              </span>
+            </span>
+          </button>
+
           {/* 4. All Dynamic Libraries */}
           {sortedLibraries.map(lib => {
             const isLibActive = location.pathname === `/library/${lib.id}`;
@@ -634,17 +652,21 @@ export default function TopBar({ variant = 'movies' }) {
             <button
               type="button"
               onClick={handleScan}
-              disabled={scanning}
+              disabled={isScanning}
               className={`flex items-center h-10 px-1 rounded-2xl transition w-full ${
-                isDark ? 'hover:bg-white/10 text-amber-300' : 'hover:bg-black/5 text-amber-600'
+                isDark 
+                  ? (isScanning ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'hover:bg-white/10 text-amber-300') 
+                  : (isScanning ? 'bg-emerald-500/20 text-emerald-800 border border-emerald-500/30' : 'hover:bg-black/5 text-amber-600')
               }`}
               title={isRtl ? 'فحص ومزامنة المكتبة' : 'Scan Library'}
             >
               <div className="w-11 h-10 flex items-center justify-center flex-shrink-0 mx-auto group-hover/sidebar:mx-0">
-                <Scan size={18} className={scanning ? 'animate-spin' : ''} />
+                <Scan size={18} className={isScanning ? 'animate-spin text-emerald-400' : ''} />
               </div>
               <span className="opacity-0 w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:w-auto transition-all duration-200 text-xs font-bold truncate ms-1.5 whitespace-nowrap overflow-hidden">
-                {scanning ? t('actions.scanning') : (isRtl ? 'فحص المكتبة' : t('actions.scan'))}
+                {isScanning 
+                  ? (isRtl ? `جاري الفحص (${scanProgress}%)` : `Scanning (${scanProgress}%)`) 
+                  : (isRtl ? 'فحص المكتبة' : t('actions.scan'))}
               </span>
             </button>
           )}
@@ -811,6 +833,18 @@ export default function TopBar({ variant = 'movies' }) {
                   <span className="truncate max-w-[65px]">
                     {activeRemoteSession ? activeRemoteSession.targetDeviceName : (isRtl ? 'بث' : 'Cast')}
                   </span>
+                </button>
+
+                {/* Watch Party Quick Button */}
+                <button
+                  type="button"
+                  onClick={() => setShowWatchPartyModal(true)}
+                  className={`w-8 h-8 rounded-full flex items-center justify-center transition ${
+                    isDark ? 'bg-white/10 hover:bg-white/20 text-sky-400' : 'bg-black/5 hover:bg-black/10 text-sky-600'
+                  }`}
+                  title={isRtl ? 'المشاهدة الجماعية' : 'Watch Party'}
+                >
+                  <Users size={15} />
                 </button>
 
                 <button
@@ -998,6 +1032,26 @@ export default function TopBar({ variant = 'movies' }) {
                     )
                   )}
                 </button>
+
+                {/* المشاهدة الجماعية */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    setShowWatchPartyModal(true);
+                  }}
+                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition ${
+                    isDark ? 'text-white/80 hover:bg-white/10' : 'text-slate-600 hover:bg-black/5'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Users size={18} className="text-sky-400" />
+                    <span>{isRtl ? 'المشاهدة الجماعية' : 'Watch Party'}</span>
+                  </div>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-sky-500/20 text-sky-400 border border-sky-500/30">
+                    SYNC
+                  </span>
+                </button>
               </div>
 
               {/* Libraries List */}
@@ -1045,14 +1099,19 @@ export default function TopBar({ variant = 'movies' }) {
                     setMobileMenuOpen(false);
                     handleScan();
                   }}
-                  disabled={scanning}
-                  style={{ color: themeInfo.color }}
+                  disabled={isScanning}
                   className={`w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl font-bold text-xs shadow-md transition active:scale-95 disabled:opacity-50 ${
-                    isDark ? 'bg-white text-black' : 'bg-white border border-slate-200 text-slate-800'
+                    isScanning
+                      ? 'bg-emerald-500 text-slate-950 font-black animate-pulse'
+                      : (isDark ? 'bg-white text-black' : 'bg-white border border-slate-200 text-slate-800')
                   }`}
                 >
-                  <Scan size={15} className={scanning ? 'animate-spin' : ''} />
-                  <span>{scanning ? t('actions.scanning') : (isRtl ? 'فحص ومزامنة المكتبة' : t('actions.scan'))}</span>
+                  <Scan size={15} className={isScanning ? 'animate-spin' : ''} />
+                  <span>
+                    {isScanning 
+                      ? (isRtl ? `جاري الفحص (${scanProgress}%)` : `Scanning (${scanProgress}%)`) 
+                      : (isRtl ? 'فحص ومزامنة المكتبة' : t('actions.scan'))}
+                  </span>
                 </button>
               )}
 
@@ -1098,6 +1157,12 @@ export default function TopBar({ variant = 'movies' }) {
       <ServerQrModal
         isOpen={showQrModal}
         onClose={() => setShowQrModal(false)}
+      />
+
+      {/* Global Join Watch Party Modal (SyncPlay) */}
+      <JoinWatchPartyModal
+        isOpen={showWatchPartyModal}
+        onClose={() => setShowWatchPartyModal(false)}
       />
     </>
   );

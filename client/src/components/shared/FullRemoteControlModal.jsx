@@ -738,7 +738,10 @@ export default function FullRemoteControlModal() {
 
                   {/* List subtitles */}
                   {availableSubtitles.map((sub, idx) => {
-                    const isSelected = selectedSubtitle && (selectedSubtitle.id === sub.id || selectedSubtitle.path === sub.path);
+                    const isSelected = !!selectedSubtitle && (
+                      (sub.path && selectedSubtitle.path === sub.path) ||
+                      (sub.id && selectedSubtitle.id === sub.id)
+                    );
                     return (
                       <button
                         key={sub.id || idx}

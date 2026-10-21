@@ -4,6 +4,7 @@ import path from 'path';
 import db from '../db.js';
 import { probeMedia, determineStreamStrategy, streamWithFFmpeg } from '../services/ffmpeg-manager.js';
 import { getLocalSubtitles } from '../services/subtitles.js';
+import { extractFrame, pruneThumbs } from '../services/thumbnails.js';
 import { requireAdmin, requireAuth } from '../services/auth.js';
 
 const router = express.Router();
@@ -222,7 +223,15 @@ router.get('/info/:type/:id', async (req, res) => {
         probe: probeData,
         audioTracks: probeData.audioTracks || [],
         subtitles: [
-          ...(probeData.embeddedSubtitles || []),
+          ...(probeData.embeddedSubtitles || []).map((s, idx) => ({
+            ...s,
+            id: s.id || `embedded_${s.index}_${idx}`,
+            streamIndex: s.index,
+            mediaType: type,
+            mediaId: id,
+            format: 'vtt',
+            isEmbedded: true
+          })),
           ...localSubs.map((s, idx) => ({
             id: `local_${idx}`,
             language: s.language || 'ar',
@@ -237,6 +246,52 @@ router.get('/info/:type/:id', async (req, res) => {
   } catch (err) {
     console.error('[Stream Info Error]:', err.message);
     return res.status(500).json({ error: { code: 'STREAM_INFO_FAILED', message: err.message } });
+  }
+});
+
+/**
+ * Thumbnail frame for hover preview: GET /api/stream/thumb/:type/:id?t=SECONDS
+ * Extracts (and disk-caches) a single downscaled frame at the given time.
+ */
+let lastPruneAt = 0;
+router.get('/thumb/:type/:id', async (req, res) => {
+  try {
+    const { type, id } = req.params;
+    if (type !== 'movie' && type !== 'episode') {
+      return res.status(400).json({ error: { code: 'INVALID_TYPE', message: 'Invalid media type' } });
+    }
+
+    let filePath = null;
+    const table = type === 'movie' ? 'movies' : 'episodes';
+    const row = db.prepare(`SELECT path FROM ${table} WHERE id = ?`).get(id);
+    if (row?.path) filePath = row.path;
+    if (!filePath) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Media not found' } });
+
+    const probeData = await probeMedia(filePath);
+    const duration = probeData.duration || 0;
+    const t = Math.max(0, parseFloat(req.query.t || '0') || 0);
+
+    const thumbPath = await extractFrame(filePath, t, `${type}_${id}`);
+    if (!thumbPath) return res.status(404).json({ error: { code: 'NO_THUMB', message: 'Could not generate thumbnail' } });
+
+    // Throttle cache pruning to once every 10 minutes
+    const now = Date.now();
+    if (now - lastPruneAt > 10 * 60 * 1000) {
+      lastPruneAt = now;
+      setImmediate(() => pruneThumbs());
+    }
+
+    res.set({
+      'Content-Type': 'image/jpeg',
+      'Cache-Control': 'private, max-age=86400',
+      'X-Thumb-Duration': String(duration || '')
+    });
+    res.sendFile(thumbPath);
+  } catch (err) {
+    console.error('[Thumb Error]:', err.message);
+    if (!res.headersSent) {
+      res.status(500).json({ error: { code: 'THUMB_FAILED', message: 'Failed to generate thumbnail' } });
+    }
   }
 });
 

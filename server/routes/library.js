@@ -2,6 +2,7 @@ import express from 'express';
 import fs from 'fs';
 import db, { getAllLibraries } from '../db.js';
 import { requireAuth } from '../services/auth.js';
+import { getContinueWatching } from '../services/playback-manager.js';
 
 const router = express.Router();
 
@@ -145,45 +146,7 @@ router.get('/landing', (req, res) => {
   });
 
 
-  const continueWatchingMovies = db.prepare(`
-    SELECT playback_state.id as playbackId, playback_state.position, playback_state.duration, playback_state.updated_at,
-           movies.id, movies.title, movies.year, movies.library_id
-    FROM playback_state
-    JOIN movies ON movies.id = playback_state.media_id AND playback_state.media_type = 'movie'
-    WHERE playback_state.user_id = ?
-    ORDER BY playback_state.updated_at DESC LIMIT 15
-  `).all(userId).map(c => ({
-    ...c,
-    type: 'movie',
-    media_type: 'movie',
-    mediaId: c.id,
-    seriesId: null,
-    progress: c.duration ? (c.position / c.duration) * 100 : 0
-  }));
-
-  const continueWatchingEpisodes = db.prepare(`
-    SELECT playback_state.id as playbackId, playback_state.position, playback_state.duration, playback_state.updated_at,
-           episodes.id as episodeId, episodes.title as episodeTitle, series.title as title, series.year, series.id as id, series.library_id
-    FROM playback_state
-    JOIN episodes ON episodes.id = playback_state.media_id AND playback_state.media_type = 'episode'
-    JOIN seasons ON seasons.id = episodes.season_id
-    JOIN series ON series.id = seasons.series_id
-    WHERE playback_state.user_id = ?
-    ORDER BY playback_state.updated_at DESC LIMIT 15
-  `).all(userId).map(c => ({
-    ...c,
-    type: 'series',
-    media_type: 'series',
-    seriesId: c.id,
-    mediaId: c.episodeId,
-    progress: c.duration ? (c.position / c.duration) * 100 : 0
-  }));
-
-  const continueWatching = [...continueWatchingMovies, ...continueWatchingEpisodes]
-    .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))
-    .slice(0, 15)
-    .map(withImage)
-    .filter(item => Boolean(item.poster));
+  const continueWatching = getContinueWatching(userId, { limit: 15 });
 
   const latestByLibrary = {};
   for (const lib of libraries) {
@@ -241,30 +204,7 @@ router.get('/movies-home', (req, res) => {
 
   const userId = req.user ? req.user.id : 1;
 
-  const continueWatchingMovies = libId ? db.prepare(`
-    SELECT playback_state.*, movies.title, movies.year, movies.id as mediaId
-    FROM playback_state
-    JOIN movies ON movies.id = playback_state.media_id AND playback_state.media_type = 'movie'
-    WHERE movies.library_id = ?
-      AND playback_state.user_id = ?
-      AND playback_state.position > 0
-      AND (playback_state.duration IS NULL OR playback_state.position < playback_state.duration * 0.95)
-  `).all(libId, userId).map(c => ({ ...c, type: 'movie', id: c.mediaId })) : [];
-
-  const continueWatchingEpisodes = db.prepare(`
-    SELECT playback_state.*, episodes.title as episodeTitle, series.title as title, series.year, episodes.id as mediaId, series.id as seriesId
-    FROM playback_state
-    JOIN episodes ON episodes.id = playback_state.media_id AND playback_state.media_type = 'episode'
-    JOIN seasons ON seasons.id = episodes.season_id
-    JOIN series ON series.id = seasons.series_id
-    WHERE playback_state.user_id = ?
-      AND playback_state.position > 0
-      AND (playback_state.duration IS NULL OR playback_state.position < playback_state.duration * 0.95)
-  `).all(userId).map(c => ({ ...c, type: 'series', id: c.seriesId, title: `${c.title} - ${c.episodeTitle || 'Episode'}` }));
-
-  const continueWatchingAll = [...continueWatchingMovies, ...continueWatchingEpisodes]
-    .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))
-    .slice(0, 10);
+  const continueWatchingAll = getContinueWatching(userId, { limit: 15 });
 
   const candidateMovies = libId ? db.prepare(`
     SELECT *, 'movie' as media_type FROM movies 
@@ -328,18 +268,7 @@ router.get('/movies-home', (req, res) => {
     return { ...item, poster: img ? `/api/image/${img.id}/thumb` : null, imageId: img?.id || null };
   });
 
-  const continueWatchingWithImages = continueWatchingAll.map(c => {
-    const queryType = c.type === 'movie' ? 'movie' : 'series';
-    const queryId = c.type === 'movie' ? c.mediaId : c.seriesId;
-    const img = db.prepare(`SELECT id FROM images WHERE media_type = ? AND media_id = ? AND image_type = 'backdrop' AND is_primary = 1 LIMIT 1`).get(queryType, queryId);
-    const posterImg = db.prepare(`SELECT id FROM images WHERE media_type = ? AND media_id = ? AND image_type = 'poster' AND is_primary = 1 LIMIT 1`).get(queryType, queryId);
-    return {
-      ...c,
-      backdrop: img ? `/api/image/${img.id}/thumb` : null,
-      poster: posterImg ? `/api/image/${posterImg.id}/thumb` : null,
-      progress: c.duration ? (c.position / c.duration) * 100 : 0
-    };
-  });
+  const continueWatchingWithImages = continueWatchingAll;
 
   res.json({
     data: {

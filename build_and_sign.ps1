@@ -16,7 +16,8 @@ Write-Host "[1/8] Cleaning previous build folders..." -ForegroundColor Cyan
 if (Test-Path "dist\setup") {
     Remove-Item -Recurse -Force "dist\setup" -ErrorAction SilentlyContinue
 }
-if (Test-Path "launcher\dist") {
+$pyinstallerCmd = Get-Command "pyinstaller" -ErrorAction SilentlyContinue
+if ($pyinstallerCmd -and (Test-Path "launcher\dist")) {
     Remove-Item -Recurse -Force "launcher\dist" -ErrorAction SilentlyContinue
 }
 if (Test-Path "launcher\build") {
@@ -25,11 +26,18 @@ if (Test-Path "launcher\build") {
 Get-ChildItem -Path . -Recurse -Filter "__pycache__" -Directory -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host "  Clean completed successfully." -ForegroundColor Green
 
+# Find available node executable (fallback to installed ARN Stream node.exe if npm/node not in PATH)
+$nodeExe = "node"
+$arnNode = "C:\Program Files\ARN Stream\bin\node.exe"
+if (Test-Path $arnNode) {
+    $nodeExe = $arnNode
+}
+
 # 2. Database Backup & Clean DB Generation
 Write-Host "[2/8] Creating development database backup & clean template..." -ForegroundColor Cyan
 Push-Location "server"
 try {
-    node "scripts/backup_and_prepare_clean_db.js"
+    & "$nodeExe" "scripts/backup_and_prepare_clean_db.js"
 } finally {
     Pop-Location
 }
@@ -39,7 +47,12 @@ Write-Host "  Database backup and clean template ready." -ForegroundColor Green
 Write-Host "[3/8] Building client frontend production bundle..." -ForegroundColor Cyan
 Push-Location "client"
 try {
-    npm run build
+    $viteBin = "node_modules\vite\bin\vite.js"
+    if (Test-Path $viteBin) {
+        & "$nodeExe" $viteBin build
+    } else {
+        npm run build
+    }
 } finally {
     Pop-Location
 }
@@ -129,13 +142,20 @@ if ($arnCert) {
 
 # 5. Compile Desktop Launcher (PyInstaller)
 Write-Host "[5/8] Compiling Windows desktop launcher (PyInstaller)..." -ForegroundColor Cyan
-Push-Location "launcher"
-try {
-    pyinstaller --clean "ARN_Stream.spec"
-} finally {
-    Pop-Location
+if ($pyinstallerCmd) {
+    Push-Location "launcher"
+    try {
+        pyinstaller --clean "ARN_Stream.spec"
+    } finally {
+        Pop-Location
+    }
+    Write-Host "  Desktop launcher compiled successfully." -ForegroundColor Green
+} elseif (Test-Path "launcher\dist\ARN_Stream.exe") {
+    Write-Host "  Using existing compiled desktop launcher: launcher\dist\ARN_Stream.exe" -ForegroundColor Green
+} else {
+    Write-Error "PyInstaller not found and launcher\dist\ARN_Stream.exe does not exist!"
+    exit 1
 }
-Write-Host "  Desktop launcher compiled successfully." -ForegroundColor Green
 
 # 6. Sign Desktop Executable
 Write-Host "[6/8] Signing internal desktop executable with DigiCert timestamp..." -ForegroundColor Cyan
@@ -208,7 +228,10 @@ if ($setupExe) {
     }
 
     # Create ZIP Distribution Package
-    $zipPackageName = "ARN_Stream_v2.0.0_Setup_Package.zip"
+    $issContent = Get-Content "installer.iss" -Raw
+    $versionMatch = [regex]::Match($issContent, '#define\s+MyAppVersion\s+"([^"]+)"')
+    $appVersion = if ($versionMatch.Success) { $versionMatch.Groups[1].Value } else { "2.0.3" }
+    $zipPackageName = "ARN_Stream_v${appVersion}_Setup_Package.zip"
     $zipPackagePath = "dist\setup\$zipPackageName"
     if (Test-Path $zipPackagePath) {
         Remove-Item -Force $zipPackagePath -ErrorAction SilentlyContinue

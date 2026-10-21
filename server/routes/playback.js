@@ -1,6 +1,7 @@
 import express from 'express';
 import db from '../db.js';
 import { requireAuth } from '../services/auth.js';
+import { getContinueWatching, removePlaybackState } from '../services/playback-manager.js';
 
 const router = express.Router();
 
@@ -40,24 +41,14 @@ router.post('/', (req, res) => {
 
 router.get('/continue', (req, res) => {
   const userId = req.user.id;
-  const { limit = 10 } = req.query;
-  const rows = db.prepare(`
-    SELECT playback_state.*, 
-      CASE 
-        WHEN playback_state.media_type='movie' THEN (SELECT title FROM movies WHERE movies.id=playback_state.media_id)
-        WHEN playback_state.media_type='episode' THEN (SELECT title FROM episodes WHERE episodes.id=playback_state.media_id)
-        WHEN playback_state.media_type='track' THEN (SELECT title FROM tracks WHERE tracks.id=playback_state.media_id)
-      END as title
-    FROM playback_state
-    WHERE user_id = ? AND position > 0 AND (duration IS NULL OR position < duration * 0.9)
-    ORDER BY updated_at DESC LIMIT ?
-  `).all(userId, Number(limit));
-  res.json({ data: rows });
+  const { limit = 15 } = req.query;
+  const list = getContinueWatching(userId, { limit: Number(limit) });
+  res.json({ data: list });
 });
 
 router.delete('/:type/:id', (req, res) => {
   const userId = req.user.id;
-  db.prepare(`DELETE FROM playback_state WHERE media_type=? AND media_id=? AND user_id = ?`).run(req.params.type, Number(req.params.id), userId);
+  removePlaybackState(userId, req.params.type, Number(req.params.id));
   res.json({ data: { success: true } });
 });
 

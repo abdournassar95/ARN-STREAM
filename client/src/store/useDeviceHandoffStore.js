@@ -177,6 +177,10 @@ export const useDeviceHandoffStore = create((set, get) => {
               window.dispatchEvent(new CustomEvent('arn-handoff-received', { detail: data }));
             } else if (eventType === 'library_updated') {
               window.dispatchEvent(new CustomEvent('arn-library-updated', { detail: data }));
+            } else if (eventType === 'scan_progress') {
+              window.dispatchEvent(new CustomEvent('arn-scan-progress', { detail: data }));
+            } else if (eventType === 'scan_completed') {
+              window.dispatchEvent(new CustomEvent('arn-scan-completed', { detail: data }));
             }
           } catch (err) {
             console.warn('[Handoff-Store] WS parse error:', err.message);

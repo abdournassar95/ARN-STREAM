@@ -5,12 +5,14 @@ import { useSettingsStore } from '../../store/useSettingsStore';
 import { useEqualizerStore } from '../../store/useEqualizerStore';
 import { useDeviceHandoffStore } from '../../store/useDeviceHandoffStore';
 import { equalizerEngine } from '../../utils/audioEqualizerEngine';
-import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Shuffle, Repeat, Repeat1, ChevronDown, ListMusic, Heart, Type, GripVertical, X, Star, Sliders, Cast } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Shuffle, Repeat, Repeat1, ChevronDown, ListMusic, Heart, Type, GripVertical, X, Star, Sliders, Cast, Activity } from 'lucide-react';
 import client, { savePlayback, toggleFavorite, recordPlay, fetchLyrics, rateTrack, saveVolumeSettings, fetchVolumeSettings } from '../../api/client';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import AddToPlaylist from './AddToPlaylist';
 import EqualizerModal from './EqualizerModal';
+import SynchronizedLyrics from './SynchronizedLyrics';
+import AudioVisualizer from './AudioVisualizer';
 import { useAuthStore } from '../../store/useAuthStore';
 
 /* ─── Animated Equalizer Bars ─── */
@@ -194,6 +196,7 @@ export default function MiniPlayer() {
   const [expanded, setExpanded] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
   const [showLyrics, setShowLyrics] = useState(false);
+  const [showVisualizer, setShowVisualizer] = useState(false);
   const [showEqualizer, setShowEqualizer] = useState(false);
   const [isFav, setIsFav] = useState(false);
   const [trackRating, setTrackRating] = useState(0);
@@ -617,6 +620,13 @@ export default function MiniPlayer() {
     }
   };
 
+  const handleDirectSeek = useCallback((targetSeconds) => {
+    if (audioRef.current && isFinite(targetSeconds)) {
+      audioRef.current.currentTime = targetSeconds;
+      setCurrentTime(targetSeconds);
+    }
+  }, []);
+
   const handleArtistClick = (e) => {
     e.stopPropagation();
     if (currentTrack?.artistId) { navigate(`/music/artist/${currentTrack.artistId}`); setExpanded(false); }
@@ -663,6 +673,18 @@ export default function MiniPlayer() {
               >
                 <Sliders size={18} />
                 {eqEnabled && <span className="absolute top-1.5 end-1.5 w-2 h-2 rounded-full bg-primaryMusic animate-pulse" />}
+              </button>
+              {/* Visualizer button */}
+              <button 
+                onClick={() => setShowVisualizer(!showVisualizer)} 
+                aria-label={isRtl ? "محلل الترددات البصري (Visualizer)" : "Audio Visualizer"}
+                className={`relative w-9 h-9 sm:w-10 sm:h-10 rounded-full border flex items-center justify-center transition ${
+                  showVisualizer ? 'bg-primaryMusic/20 border-primaryMusic/40 text-primaryMusic' : 'bg-surface border-border text-muted hover:text-text'
+                }`}
+                title={isRtl ? "محلل الترددات البصري (Visualizer)" : "Audio Visualizer"}
+              >
+                <Activity size={18} />
+                {showVisualizer && <span className="absolute top-1.5 end-1.5 w-2 h-2 rounded-full bg-primaryMusic animate-pulse" />}
               </button>
               {/* Favorite button */}
               <button onClick={() => favMut.mutate()} aria-label="Toggle favorite" className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full border flex items-center justify-center transition ${isFav ? 'bg-pink-500/20 border-pink-500/30 text-pink-500' : 'bg-surface border-border text-muted hover:text-pink-400'}`}>
@@ -725,20 +747,28 @@ export default function MiniPlayer() {
               /* Now Playing or Lyrics */
               <div className="flex-1 flex flex-col items-center justify-center px-6 pb-4 overflow-y-auto">
                 {showLyrics ? (
-                  <div className="w-full max-w-[400px] flex-1 flex flex-col items-center pt-8">
-                    <h3 className="text-xl font-bold mb-6 text-primaryMusic">{isRtl ? 'الكلمات' : 'Lyrics'}</h3>
-                    <div className="flex-1 overflow-y-auto w-full text-center scrollbar-none pb-10">
-                      {lyricsData?.lyrics ? (
-                        <p className="text-lg leading-loose text-tx/90 whitespace-pre-wrap">{lyricsData.lyrics}</p>
-                      ) : (
-                        <p className="text-muted">لا توجد كلمات متاحة لهذه الأغنية</p>
-                      )}
-                    </div>
+                  <div className="w-full flex-1 flex flex-col h-full overflow-hidden">
+                    <SynchronizedLyrics
+                      trackId={currentTrack.id}
+                      currentTime={currentTime}
+                      duration={duration}
+                      isPlaying={isPlaying}
+                      onSeek={handleDirectSeek}
+                      trackTitle={currentTrack.title}
+                      artistName={currentTrack.artistName}
+                      albumTitle={currentTrack.albumTitle}
+                    />
                   </div>
                 ) : (
                   <>
                     <div className="w-[220px] h-[220px] xs:w-[260px] xs:h-[260px] sm:w-[300px] sm:h-[300px] rounded-2xl sm:rounded-3xl overflow-hidden bg-surface border border-tx/10 shadow-[0_0_40px_rgba(255,255,255,0.06)] flex-shrink-0 relative">
-                      {imgSrc ? <img src={imgSrc} alt={currentTrack.title} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-surface to-surfaceHover"><ListMusic size={48} className="text-muted/30" /></div>}
+                      {showVisualizer ? (
+                        <AudioVisualizer isPlaying={isPlaying} coverSrc={imgSrc} trackTitle={currentTrack.title} />
+                      ) : imgSrc ? (
+                        <img src={imgSrc} alt={currentTrack.title} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-surface to-surfaceHover"><ListMusic size={48} className="text-muted/30" /></div>
+                      )}
                       <div className="absolute inset-0 rounded-2xl sm:rounded-3xl ring-1 ring-inset ring-white/10 pointer-events-none"></div>
                     </div>
                     <div className="mt-5 text-center w-full max-w-[320px]">
@@ -792,10 +822,16 @@ export default function MiniPlayer() {
 
           {/* ══ DESKTOP (≥ md) ══ */}
           <div className="flex-1 hidden md:flex gap-6 lg:gap-8 overflow-hidden px-6 lg:px-10 pb-6">
-            {/* LEFT: Album Art */}
+            {/* LEFT: Album Art or Visualizer */}
             <div className="flex flex-col items-center justify-center w-[45%] lg:w-[40%] xl:w-[38%] flex-shrink-0">
               <div className="w-[280px] h-[280px] lg:w-[340px] lg:h-[340px] xl:w-[400px] xl:h-[400px] rounded-3xl overflow-hidden bg-surface border border-tx/10 shadow-[0_0_50px_rgba(255,255,255,0.06)] flex-shrink-0 relative">
-                {imgSrc ? <img src={imgSrc} alt={currentTrack.title} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-surface to-surfaceHover"><ListMusic size={64} className="text-muted/30" /></div>}
+                {showVisualizer ? (
+                  <AudioVisualizer isPlaying={isPlaying} coverSrc={imgSrc} trackTitle={currentTrack.title} />
+                ) : imgSrc ? (
+                  <img src={imgSrc} alt={currentTrack.title} className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-surface to-surfaceHover"><ListMusic size={64} className="text-muted/30" /></div>
+                )}
                 {/* Subtle inner highlight */}
                 <div className="absolute inset-0 rounded-3xl ring-1 ring-inset ring-white/10 pointer-events-none"></div>
               </div>
@@ -835,16 +871,17 @@ export default function MiniPlayer() {
             {/* RIGHT: Queue or Lyrics */}
             <div className="flex-1 border-s border-border ps-6 lg:ps-8 relative">
               {showLyrics ? (
-                <div className="absolute inset-0 flex flex-col pt-4 pb-12 overflow-y-auto px-4 lg:px-12 items-center text-center">
-                  <h3 className="text-2xl font-bold mb-8 text-primaryMusic sticky top-0 bg-bgr/90 backdrop-blur-md py-4 w-full z-10">{isRtl ? 'كلمات الأغنية' : 'Lyrics'}</h3>
-                  {lyricsData?.lyrics ? (
-                    <p className="text-xl leading-loose text-tx/90 whitespace-pre-wrap max-w-2xl">{lyricsData.lyrics}</p>
-                  ) : (
-                    <div className="flex flex-col items-center justify-center h-full opacity-50 mt-20">
-                      <Type size={48} className="mb-4" />
-                      <p className="text-lg">{isRtl ? 'لا توجد كلمات متاحة لهذه الأغنية' : 'No lyrics available for this track'}</p>
-                    </div>
-                  )}
+                <div className="absolute inset-0 flex flex-col overflow-hidden">
+                  <SynchronizedLyrics
+                    trackId={currentTrack.id}
+                    currentTime={currentTime}
+                    duration={duration}
+                    isPlaying={isPlaying}
+                    onSeek={handleDirectSeek}
+                    trackTitle={currentTrack.title}
+                    artistName={currentTrack.artistName}
+                    albumTitle={currentTrack.albumTitle}
+                  />
                 </div>
               ) : (
                 <QueueList

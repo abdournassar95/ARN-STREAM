@@ -1,15 +1,16 @@
-const CACHE_NAME = 'arn-stream-v3';
+const CACHE_NAME = 'arn-stream-v4';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
   '/icon.png',
-  '/favicon-64.png'
+  '/favicon-64.png',
+  '/favicon.jpg'
 ];
 
 // Install: cache static shell
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS)).catch(() => {})
   );
   self.skipWaiting();
 });
@@ -22,6 +23,11 @@ self.addEventListener('activate', (event) => {
     )
   );
   self.clients.claim();
+});
+
+// Allow the app to force a refresh of the service worker (new build deployed)
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 // Fetch: Network-First for navigation (SPA index.html), Cache-First for static assets
@@ -59,7 +65,7 @@ self.addEventListener('fetch', (event) => {
     caches.match(request).then((cached) => {
       if (cached) return cached;
       return fetch(request).then((response) => {
-        if (response.ok && response.type === 'basic') {
+        if (response.ok && (response.type === 'basic' || response.type === 'default')) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
         }

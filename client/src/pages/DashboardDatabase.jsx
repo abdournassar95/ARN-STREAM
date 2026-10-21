@@ -4,13 +4,14 @@ import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useAuthStore } from '../store/useAuthStore';
+import { useScanStore } from '../store/useScanStore';
 import {
   Database, HardDrive, RefreshCw, Trash2, CheckCircle2, AlertTriangle,
   FolderSync, ShieldCheck, FileSearch, Sparkles, Layers, Download,
   Search, Edit3, ArrowUpDown, Check, X, Film, Tv, Music, Folder,
   ExternalLink, ChevronRight, ChevronLeft, Disc, User, Info, FileX2,
   Users, UserPlus, KeyRound, Shield, Lock, Eye, EyeOff, FolderOpen,
-  Compass, BookOpen, Drama
+  Compass, BookOpen, Drama, Scan
 } from 'lucide-react';
 import {
   fetchDatabaseStats, cleanOrphanedData, cleanMissingFiles, fetchDuplicates,
@@ -18,7 +19,7 @@ import {
   fetchDatabaseRecords, updateDatabaseRecord, deleteDatabaseRecord,
   checkPathExists, batchRemapPaths, batchUpdateRecordsLibrary,
   batchDeleteDatabaseRecords, fetchLibraries, fetchLibraryContents,
-  clearLibraryContentsApi, createDatabaseUserApi
+  clearLibraryContentsApi, createDatabaseUserApi, scanSingleLibrary
 } from '../api/client';
 
 export default function DashboardDatabase() {
@@ -28,9 +29,11 @@ export default function DashboardDatabase() {
   const { theme } = useSettingsStore();
   const { user: currentUser } = useAuthStore();
   const isDark = theme !== 'light';
+  const { isScanning, progress: scanProgress, currentFile: scanCurrentFile, startScan, openDetailsModal, newItems } = useScanStore();
 
   // Sub-tabs: 'health', 'libraries', 'users', 'explorer', 'duplicates'
   const [subTab, setSubTab] = useState('health');
+  const [scanningLibId, setScanningLibId] = useState(null);
 
   // Notifications / Feedback toast
   const [notification, setNotification] = useState(null);
@@ -599,6 +602,60 @@ export default function DashboardDatabase() {
 
           {/* Action Cards Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* Card 0: Full Library Scan & Sync */}
+            <div className="dash-card md:col-span-2 bg-gradient-to-r from-emerald-500/10 via-cyan-500/10 to-transparent border border-emerald-500/30">
+              <div className="dash-card-inner p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center flex-shrink-0 text-emerald-400 shadow-md">
+                    <Scan size={20} className={isScanning ? 'animate-spin' : ''} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-emerald-400 flex items-center gap-2">
+                      <span>{isRtl ? 'فحص شامل وتحديث فوري للمكتبات' : 'Full Library Scan & Sync'}</span>
+                      {isScanning && (
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-mono animate-pulse border border-emerald-500/30">
+                          {scanProgress}%
+                        </span>
+                      )}
+                    </h3>
+                    <p className="text-xs mt-1 leading-relaxed" style={mutedStyle}>
+                      {isScanning 
+                        ? (scanCurrentFile ? `${isRtl ? 'جاري فحص: ' : 'Scanning: '}${scanCurrentFile}` : (isRtl ? 'جاري الفحص المباشر...' : 'Scanning files...'))
+                        : (isRtl
+                          ? 'مسح حقيقي ولحظي لكافة مسارات الأقراص الصلبة، رصد أي وسائط أو حلقات جديدة، وتحديث قاعدة البيانات دون الحاجة لإعادة التشغيل.'
+                          : 'Deep real-time scan of all local disks, detect newly added media, and sync database instantly.')}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                  {newItems.length > 0 && !isScanning && (
+                    <button
+                      type="button"
+                      onClick={openDetailsModal}
+                      className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm"
+                    >
+                      <Sparkles size={13} className="text-amber-400" />
+                      <span>{isRtl ? `عرض المكتشف (${newItems.length})` : `New Items (${newItems.length})`}</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={startScan}
+                    disabled={isScanning}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-lg ${
+                      isScanning
+                        ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 cursor-not-allowed'
+                        : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/25 active:scale-95'
+                    }`}
+                  >
+                    <Scan size={15} className={isScanning ? 'animate-spin' : ''} />
+                    <span>{isScanning ? (isRtl ? `جاري الفحص (${scanProgress}%)` : `Scanning (${scanProgress}%)`) : (isRtl ? 'بدء الفحص الشامل الآن' : 'Start Full Scan Now')}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
             {/* Card 1: Clean Orphaned Data */}
             <div className="dash-card">
               <div className="dash-card-inner p-4 flex flex-col justify-between h-full space-y-3">
@@ -875,6 +932,30 @@ export default function DashboardDatabase() {
                     {/* Action Bar on Library Card */}
                     <div className="flex items-center justify-between pt-2 border-t border-slate-800/60 text-[11px]">
                       <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          setScanningLibId(lib.id);
+                          try {
+                            await scanSingleLibrary(lib.id);
+                            showNotification(isRtl ? `تم فحص وتحديث مكتبة «${lib.name}» بنجاح` : `Scanned «${lib.name}» successfully`);
+                            refetchLibraries();
+                            refetchStats();
+                            refetchLibContents();
+                          } catch (err) {
+                            showNotification(err.response?.data?.error?.message || err.message, 'error');
+                          } finally {
+                            setScanningLibId(null);
+                          }
+                        }}
+                        disabled={scanningLibId === lib.id || isScanning}
+                        className="text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-semibold disabled:opacity-40"
+                        title={isRtl ? 'فحص مجلدات هذه المكتبة فقط والبحث عن وسائط جديدة' : 'Scan this library folder'}
+                      >
+                        <RefreshCw size={13} className={scanningLibId === lib.id ? 'animate-spin text-emerald-400' : ''} />
+                        <span>{scanningLibId === lib.id ? (isRtl ? 'فحص...' : 'Scanning...') : (isRtl ? 'فحص الآن' : 'Scan Now')}</span>
+                      </button>
+
+                      <button
                         onClick={(e) => {
                           e.stopPropagation();
                           setEditingItem({ ...lib, table: 'libraries' });
@@ -882,7 +963,7 @@ export default function DashboardDatabase() {
                         className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-semibold"
                       >
                         <Edit3 size={13} />
-                        <span>{isRtl ? 'تعديل المكتبة' : 'Edit'}</span>
+                        <span>{isRtl ? 'تعديل' : 'Edit'}</span>
                       </button>
 
                       <button
@@ -972,6 +1053,29 @@ export default function DashboardDatabase() {
                     >
                       <FileX2 size={13} />
                       <span>{isRtl ? 'المفقودة فقط' : 'Missing Only'}</span>
+                    </button>
+
+                    {/* Scan this library button */}
+                    <button
+                      onClick={async () => {
+                        setScanningLibId(activeLibrary.id);
+                        try {
+                          await scanSingleLibrary(activeLibrary.id);
+                          showNotification(isRtl ? `تم فحص وتحديث مكتبة «${activeLibrary.name}» بنجاح` : `Scanned «${activeLibrary.name}» successfully`);
+                          refetchLibraries();
+                          refetchStats();
+                          refetchLibContents();
+                        } catch (err) {
+                          showNotification(err.response?.data?.error?.message || err.message, 'error');
+                        } finally {
+                          setScanningLibId(null);
+                        }
+                      }}
+                      disabled={scanningLibId === activeLibrary.id || isScanning}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs font-bold flex items-center gap-1.5 transition shadow-sm disabled:opacity-50"
+                    >
+                      <RefreshCw size={13} className={scanningLibId === activeLibrary.id ? 'animate-spin text-emerald-400' : ''} />
+                      <span>{scanningLibId === activeLibrary.id ? (isRtl ? 'جاري الفحص...' : 'Scanning...') : (isRtl ? 'فحص المكتبة الآن' : 'Scan Library Now')}</span>
                     </button>
                   </div>
                 </div>

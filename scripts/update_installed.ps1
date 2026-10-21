@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 # ARN Stream - Update Installed Version
 # Developer: Abdou Ragab Nassar - ARN Technology
 # ==============================================================================
@@ -65,6 +65,27 @@ Get-NetTCPConnection -LocalPort 8096 -ErrorAction SilentlyContinue | Select-Obje
 }
 Start-Sleep -Seconds 1
 Write-Host "  OK: Active processes stopped." -ForegroundColor Green
+
+# Repair database if clean candidate exists
+$appDataDir = [System.IO.Path]::Combine($env:APPDATA, "ARN_Stream", "data")
+$cleanDb = [System.IO.Path]::Combine($appDataDir, "media_clean.db")
+$mainDb = [System.IO.Path]::Combine($appDataDir, "media.db")
+if (-not (Test-Path $cleanDb)) {
+    $altPath = "C:\Users\ABOOOOD\AppData\Roaming\ARN_Stream\data\media_clean.db"
+    if (Test-Path $altPath) {
+        $cleanDb = $altPath
+        $mainDb = "C:\Users\ABOOOOD\AppData\Roaming\ARN_Stream\data\media.db"
+    }
+}
+if (Test-Path $cleanDb) {
+    Write-Host "  Applying clean repaired database..." -ForegroundColor Yellow
+    Copy-Item -Force $mainDb "$mainDb.corrupt_backup" -ErrorAction SilentlyContinue
+    Copy-Item -Force $cleanDb $mainDb -ErrorAction SilentlyContinue
+    Remove-Item -Force "$mainDb-wal" -ErrorAction SilentlyContinue
+    Remove-Item -Force "$mainDb-shm" -ErrorAction SilentlyContinue
+    Remove-Item -Force $cleanDb -ErrorAction SilentlyContinue
+    Write-Host "  OK: Repaired database swapped successfully!" -ForegroundColor Green
+}
 
 # 2. Copy updated server files
 Write-Host "`n[2/4] Copying updated server code..." -ForegroundColor Cyan
