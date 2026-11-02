@@ -1,501 +1,1358 @@
-import { useState, useRef, useEffect } from 'react';
-import { useTranslation } from 'react-i18next';
-import { 
-  Tv, 
-  Maximize2, 
-  Minimize2, 
-  RotateCw, 
-  ExternalLink, 
-  Server, 
-  Info, 
-  ChevronDown, 
-  Sparkles,
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import {
+  Tv,
+  Film,
+  Layers,
+  Star,
+  History,
+  ListPlus,
+  Search,
+  FolderOpen,
   Radio,
-  Tv2,
-  Copy,
-  Check,
+  Play,
+  X,
+  ChevronDown,
+  Maximize2,
+  Minimize2,
   KeyRound,
-  Smartphone,
-  Monitor,
-  X
+  RefreshCw,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import TopBar from '../components/shared/TopBar';
-import CosmicBackground from '../components/shared/CosmicBackground';
 import { useSettingsStore } from '../store/useSettingsStore';
+import { usePlayerStore } from '../store/usePlayerStore';
+import { HlsVideoPlayer } from '../components/iptv/HlsVideoPlayer';
+import { PlaylistModal } from '../components/iptv/PlaylistModal';
+import { getCategoryVisual, getChannelFallbackLogo } from '../utils/iptvIcons';
+import {
+  loadCatalogFromIdb,
+  saveCatalogToIdb,
+  normalizeChannelItem,
+} from '../utils/catalogStorage';
 
-const DEFAULT_FG_CODE = '232425';
-
-const PRESET_SERVERS = [
-  { id: 'auto', label: 'الخادم المباشر المدمج (تفعيل تلقائي 232425)', url: '/api/live/player' },
-  { id: 'primary', label: 'web.dramalive.cc (الرسمي المباشر)', url: 'https://web.dramalive.cc' },
-  { id: 'backup', label: 'web.dramalive.app (السيرفر البديل)', url: 'https://web.dramalive.app' },
-  { id: 'website', label: 'dramalive.website', url: 'https://dramalive.website' },
-];
+const STORAGE_KEYS = {
+  FAVORITES: 'arn_iptv_clean_v5_favorites',
+  HISTORY: 'arn_iptv_clean_v5_history',
+  CUSTOM_PLAYLISTS: 'arn_iptv_clean_v5_playlists',
+  CUSTOM_CATEGORIES: 'arn_iptv_clean_v5_categories',
+  CUSTOM_CHANNELS: 'arn_iptv_clean_v5_channels',
+};
 
 export default function LiveTv() {
-  const { t, i18n } = useTranslation();
-  const isRtl = i18n.language === 'ar';
-  const { liveTvUrl, setLiveTvUrl, theme } = useSettingsStore();
+  const { theme, setTheme } = useSettingsStore();
   const isDark = theme !== 'light';
 
-  const [activeUrl, setActiveUrl] = useState(liveTvUrl || PRESET_SERVERS[0].url);
-  const [iframeKey, setIframeKey] = useState(1);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isCinemaMode, setIsCinemaMode] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [showTips, setShowTips] = useState(false);
-  const [showServerMenu, setShowServerMenu] = useState(false);
-  const [customUrlInput, setCustomUrlInput] = useState('');
-  const [showCustomModal, setShowCustomModal] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [viewMode, setViewMode] = useState('wide'); // 'wide' | 'mobile'
-  const [showExpandHint, setShowExpandHint] = useState(true);
-
-  const containerRef = useRef(null);
-  const iframeRef = useRef(null);
-
-  // Sync activeUrl with store
+  // Stop background music and terminate music player immediately when Live TV opens
   useEffect(() => {
-    if (liveTvUrl && liveTvUrl !== activeUrl) {
-      setActiveUrl(liveTvUrl);
-    }
-  }, [liveTvUrl]);
-
-  // Handle Fullscreen change listeners
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    usePlayerStore.getState().stopMusicForVideo();
   }, []);
 
-  // Copy FG Code to clipboard
-  const handleCopyFgCode = () => {
-    navigator.clipboard.writeText(DEFAULT_FG_CODE);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
-  };
+  const [playlists, setPlaylists] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.CUSTOM_PLAYLISTS);
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
 
-  // Reload iframe
-  const handleReload = () => {
-    setIsLoading(true);
-    setIframeKey(k => k + 1);
-  };
+  const [categories, setCategories] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.CUSTOM_CATEGORIES);
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
 
-  // Toggle native full screen
-  const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      if (containerRef.current?.requestFullscreen) {
-        containerRef.current.requestFullscreen();
+  const [channels, setChannels] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.CUSTOM_CHANNELS);
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed.map(normalizeChannelItem) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [radioCatalog, setRadioCatalog] = useState({ categories: [], channels: [] });
+
+  const [activePlaylistId, setActivePlaylistId] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.CUSTOM_PLAYLISTS);
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) && parsed.length > 0 ? parsed[0].id : '';
+    } catch {
+      return '';
+    }
+  });
+
+  const [activeSection, setActiveSection] = useState('live');
+  const [selectedCategoryId, setSelectedCategoryId] = useState('ALL');
+  const [loadingCategoryId, setLoadingCategoryId] = useState(null);
+  const [isBootstrapping, setIsBootstrapping] = useState(false);
+
+  // Collapsible Categories panel
+  const [isCategoriesOpen, setIsCategoriesOpen] = useState(false);
+
+  // Cinema mode (hides TopBar to give 100% height to IPTV workspace)
+  const [isCinemaMode, setIsCinemaMode] = useState(false);
+
+  // Search and Filter States
+  const [catSearch, setCatSearch] = useState('');
+  const [chSearch, setChSearch] = useState('');
+  const [onlyFavFilter, setOnlyFavFilter] = useState(false);
+
+  // Favorites & Watch History IDs
+  const [favoriteIds, setFavoriteIds] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.FAVORITES);
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [historyIds, setHistoryIds] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.HISTORY);
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Currently Playing Channel (Prioritize MBC Masr on startup)
+  const [activeChannel, setActiveChannel] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.CUSTOM_CHANNELS);
+      const parsed = saved ? JSON.parse(saved) : [];
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const normalized = parsed.map(normalizeChannelItem);
+        const mbcMasr = normalized.find(
+          (c) =>
+            c.fgLiveId === 'live_tv_mbcmsr' ||
+            c.name?.includes('MBC Masr 1') ||
+            c.name?.includes('إم بي سي مصر 1') ||
+            c.name?.includes('MBC Masr') ||
+            c.name?.includes('إم بي سي مصر')
+        );
+        return mbcMasr || normalized[0];
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [isPlaylistModalOpen, setIsPlaylistModalOpen] = useState(false);
+
+  const handleImportSuccess = useCallback((newPlaylist, newCategories, newChannels) => {
+    const normalizedChannels = (newChannels || []).map(normalizeChannelItem);
+
+    setPlaylists((prev) => {
+      const updated = [newPlaylist, ...prev.filter((p) => p.id !== newPlaylist.id)];
+      try {
+        localStorage.setItem(STORAGE_KEYS.CUSTOM_PLAYLISTS, JSON.stringify(updated));
+      } catch {}
+      saveCatalogToIdb('playlists', updated);
+      return updated;
+    });
+
+    setCategories((prev) => {
+      const filtered = prev.filter((c) => c.playlistId !== newPlaylist.id);
+      const updated = [...filtered, ...newCategories];
+      try {
+        localStorage.setItem(STORAGE_KEYS.CUSTOM_CATEGORIES, JSON.stringify(updated));
+      } catch {}
+      saveCatalogToIdb('categories', updated);
+      return updated;
+    });
+
+    setChannels((prev) => {
+      const filtered = prev.filter((ch) => ch.playlistId !== newPlaylist.id);
+      const updated = [...filtered, ...normalizedChannels];
+      try {
+        localStorage.setItem(STORAGE_KEYS.CUSTOM_CHANNELS, JSON.stringify(updated.slice(0, 1000)));
+      } catch {}
+      saveCatalogToIdb('channels', updated);
+      return updated;
+    });
+
+    setActivePlaylistId(newPlaylist.id);
+    const egyptCat = newCategories.find(
+      (c) =>
+        c.name.includes('مصر') ||
+        c.id.toLowerCase().includes('eg') ||
+        c.name.toLowerCase().includes('egypt')
+    );
+
+    if (egyptCat) {
+      setSelectedCategoryId(egyptCat.id);
+      setActiveSection('live');
+      const mbcMasr = normalizedChannels.find(
+        (ch) =>
+          (ch.categoryId === egyptCat.id || ch.groupTitle?.includes('مصر')) &&
+          (ch.fgLiveId === 'live_tv_mbcmsr' ||
+            ch.name?.includes('MBC Masr 1') ||
+            ch.name?.includes('إم بي سي مصر 1') ||
+            ch.name?.includes('MBC Masr') ||
+            ch.name?.includes('إم بي سي مصر'))
+      );
+      if (mbcMasr) {
+        setActiveChannel(mbcMasr);
+      } else {
+        const egyptChannel = normalizedChannels.find((ch) => ch.categoryId === egyptCat.id);
+        setActiveChannel(egyptChannel || normalizedChannels[0] || null);
       }
     } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen();
+      setSelectedCategoryId('ALL');
+      if (normalizedChannels.length > 0) {
+        setActiveChannel(normalizedChannels[0]);
       }
     }
-  };
+  }, []);
 
-  // Change server URL
-  const handleSelectServer = (url) => {
-    setActiveUrl(url);
-    setLiveTvUrl(url);
-    setIsLoading(true);
-    setIframeKey(k => k + 1);
-    setShowServerMenu(false);
-  };
-
-  // Apply custom URL
-  const handleApplyCustomUrl = (e) => {
-    e.preventDefault();
-    if (!customUrlInput.trim()) return;
-    let url = customUrlInput.trim();
-    if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('/')) {
-      url = 'https://' + url;
+  const loadBuiltinCatalog = useCallback(async () => {
+    setIsBootstrapping(true);
+    try {
+      const resp = await fetch('/api/live/catalog/builtin');
+      const data = await resp.json();
+      if (data.success && data.playlist) {
+        handleImportSuccess(data.playlist, data.categories || [], data.channels || []);
+      }
+    } catch (err) {
+      console.warn('[ARN IPTV] Failed to load built-in catalog:', err);
+    } finally {
+      setIsBootstrapping(false);
     }
-    handleSelectServer(url);
-    setShowCustomModal(false);
-    setCustomUrlInput('');
-  };
+  }, [handleImportSuccess]);
 
-  // Open stream in a standalone external tab/window
-  const handleOpenExternal = () => {
-    const target = activeUrl.startsWith('/') ? window.location.origin + activeUrl : activeUrl;
-    window.open(target, '_blank', 'noopener,noreferrer');
-  };
-
-  // Keyboard shortcut listener: F for fullscreen, C for cinema, R for reload
+  // Fetch Arabic Radio & Quran catalog on mount
   useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-      if (e.key === 'f' || e.key === 'F') {
-        toggleFullscreen();
-      } else if (e.key === 'c' || e.key === 'C') {
-        setIsCinemaMode(prev => !prev);
-      } else if (e.key === 'r' || e.key === 'R') {
-        handleReload();
-      } else if (e.key === 'Escape' && isCinemaMode) {
-        setIsCinemaMode(false);
-      }
+    let active = true;
+    fetch('/api/live/radio/catalog')
+      .then((r) => r.json())
+      .then((data) => {
+        if (!active || !data.success) return;
+        setRadioCatalog({
+          categories: data.categories || [],
+          channels: (data.channels || []).map(normalizeChannelItem),
+        });
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isCinemaMode]);
+  }, []);
 
-  const isMaximized = isCinemaMode || isFullscreen;
+  // Hydrate full catalog from IndexedDB on startup, or bootstrap built-in catalog if empty
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      loadCatalogFromIdb('playlists'),
+      loadCatalogFromIdb('categories'),
+      loadCatalogFromIdb('channels'),
+    ])
+      .then(([idbPlaylists, idbCategories, idbChannels]) => {
+        if (!active) return;
+        const hasIdbData =
+          idbPlaylists && idbPlaylists.length > 0 && idbChannels && idbChannels.length > 0;
+
+        if (hasIdbData) {
+          setPlaylists(idbPlaylists);
+          setActivePlaylistId((prev) => prev || idbPlaylists[0].id);
+          if (idbCategories && idbCategories.length > 0) {
+            setCategories(idbCategories);
+          }
+          setChannels((prev) => (idbChannels.length >= prev.length ? idbChannels : prev));
+          setActiveChannel((prev) => {
+            if (prev) return normalizeChannelItem(prev);
+            const mbcMasr = idbChannels.find(
+              (c) =>
+                c.fgLiveId === 'live_tv_mbcmsr' ||
+                c.name?.includes('MBC Masr 1') ||
+                c.name?.includes('إم بي سي مصر 1') ||
+                c.name?.includes('MBC Masr') ||
+                c.name?.includes('إم بي سي مصر')
+            );
+            return mbcMasr || idbChannels[0] || null;
+          });
+        } else if (playlists.length === 0 && channels.length === 0) {
+          // Automatically bootstrap the built-in Arabic + 61 Egyptian + Radio catalog on first visit
+          loadBuiltinCatalog();
+        }
+      })
+      .catch(() => {
+        if (active && playlists.length === 0 && channels.length === 0) {
+          loadBuiltinCatalog();
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Persist Favorites & History
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.FAVORITES, JSON.stringify(favoriteIds));
+    } catch {}
+  }, [favoriteIds]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(historyIds));
+    } catch {}
+  }, [historyIds]);
+
+  // Keep active playlist valid if lists change
+  useEffect(() => {
+    if (playlists.length > 0 && (!activePlaylistId || !playlists.some((p) => p.id === activePlaylistId))) {
+      setActivePlaylistId(playlists[0].id);
+    }
+  }, [playlists, activePlaylistId]);
+
+  // Set default category and active channel when switching section or playlist
+  useEffect(() => {
+    if (activeSection === 'radio') {
+      setSelectedCategoryId('rad-cat-eg');
+      const firstEgRadio =
+        radioCatalog.channels.find((ch) => ch.categoryId === 'rad-cat-eg') ||
+        radioCatalog.channels[0];
+      if (firstEgRadio) {
+        setActiveChannel(firstEgRadio);
+      }
+    } else if (activeSection === 'live') {
+      const egyptCat = categories.find(
+        (c) =>
+          c.playlistId === activePlaylistId &&
+          (c.name.includes('مصر') ||
+            c.id.toLowerCase().includes('eg') ||
+            c.name.toLowerCase().includes('egypt'))
+      );
+      if (egyptCat) {
+        setSelectedCategoryId(egyptCat.id);
+      } else {
+        setSelectedCategoryId('ALL');
+      }
+      // If coming back from Radio, automatically resume a Live TV channel (MBC Masr 1 preferred)
+      setActiveChannel((prev) => {
+        if (prev && prev.section !== 'radio') return prev;
+        const liveChs = channels.filter(
+          (c) => c.playlistId === activePlaylistId && c.section !== 'radio'
+        );
+        const mbcMasr = liveChs.find(
+          (c) =>
+            c.fgLiveId === 'live_tv_mbcmsr' ||
+            c.name?.includes('MBC Masr 1') ||
+            c.name?.includes('إم بي سي مصر 1') ||
+            c.name?.includes('MBC Masr') ||
+            c.name?.includes('إم بي سي مصر')
+        );
+        return mbcMasr || liveChs[0] || prev;
+      });
+    } else {
+      setSelectedCategoryId('ALL');
+    }
+  }, [activeSection, activePlaylistId, radioCatalog.channels.length]);
+
+  // Fetch channels on demand when clicking a category with remoteTopic that hasn't loaded channels yet
+  useEffect(() => {
+    if (selectedCategoryId === 'ALL' || !activePlaylistId) return;
+    const cat = categories.find(
+      (c) => c.id === selectedCategoryId && c.playlistId === activePlaylistId
+    );
+    if (!cat || !cat.remoteTopic) return;
+
+    const isEgypt =
+      cat.name.includes('مصر') ||
+      cat.id.toLowerCase().includes('eg') ||
+      cat.name.toLowerCase().includes('egypt');
+
+    const hasAhlyOrSport = channels.some(
+      (ch) =>
+        ch.playlistId === activePlaylistId &&
+        (ch.categoryId === selectedCategoryId || ch.groupTitle?.includes('مصر')) &&
+        (ch.fgLiveId === 'live_tv_alahlytv' ||
+          ch.name?.includes('الاهلي') ||
+          ch.name?.includes('Ahly') ||
+          ch.name?.includes('أون سبورت') ||
+          ch.name?.includes('Sport'))
+    );
+
+    const existingCount = channels.filter(
+      (ch) =>
+        ch.playlistId === activePlaylistId &&
+        (ch.categoryId === selectedCategoryId || (isEgypt && ch.groupTitle?.includes('مصر')))
+    ).length;
+
+    if (existingCount >= (cat.count || 50) && (!isEgypt || hasAhlyOrSport)) return;
+
+    let cancelled = false;
+    const activePl = playlists.find((p) => p.id === activePlaylistId);
+    const code = activePl?.type === 'fg_code' ? activePl.codeOrUrl : '232425';
+    const remoteTopicToFetch = isEgypt ? '20' : cat.remoteTopic;
+
+    setLoadingCategoryId(selectedCategoryId);
+    fetch(
+      `/api/live/fg/topic/${encodeURIComponent(remoteTopicToFetch)}?code=${encodeURIComponent(
+        code
+      )}&playlistId=${encodeURIComponent(activePlaylistId)}`
+    )
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled || !data.success || !Array.isArray(data.channels)) return;
+        const normalized = data.channels.map((ch) =>
+          normalizeChannelItem({
+            ...ch,
+            playlistId: activePlaylistId,
+            categoryId: cat.id,
+          })
+        );
+        setChannels((prev) => {
+          const filtered = prev.filter(
+            (c) => !(c.playlistId === activePlaylistId && c.categoryId === cat.id)
+          );
+          const updated = [...filtered, ...normalized];
+          try {
+            localStorage.setItem(STORAGE_KEYS.CUSTOM_CHANNELS, JSON.stringify(updated.slice(0, 1000)));
+            saveCatalogToIdb('channels', updated);
+          } catch {}
+          return updated;
+        });
+        if (normalized.length > 0) {
+          setCategories((prev) =>
+            prev.map((c) =>
+              c.id === cat.id && c.playlistId === activePlaylistId
+                ? { ...c, count: normalized.length }
+                : c
+            )
+          );
+        }
+      })
+      .catch((fetchErr) => {
+        console.warn(`[ARN IPTV] Failed to fetch channels for category "${cat?.name || selectedCategoryId}":`, fetchErr);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingCategoryId(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCategoryId, activePlaylistId, categories, channels, playlists]);
+
+  const toggleFavorite = (channelId) => {
+    setFavoriteIds((prev) =>
+      prev.includes(channelId) ? prev.filter((id) => id !== channelId) : [channelId, ...prev]
+    );
+  };
+
+  const handleChannelWatched = useCallback((ch) => {
+    setHistoryIds((prev) => [ch.id, ...prev.filter((id) => id !== ch.id)].slice(0, 50));
+  }, []);
+
+  const handleServersLoaded = useCallback((channelId, loadedServers) => {
+    setChannels((prev) =>
+      prev.map((ch) => (ch.id === channelId ? { ...ch, sources: loadedServers } : ch))
+    );
+    setActiveChannel((prev) =>
+      prev && prev.id === channelId ? { ...prev, sources: loadedServers } : prev
+    );
+  }, []);
+
+  const handleDeletePlaylist = (playlistId) => {
+    setPlaylists((prev) => {
+      const updated = prev.filter((p) => p.id !== playlistId);
+      try {
+        localStorage.setItem(STORAGE_KEYS.CUSTOM_PLAYLISTS, JSON.stringify(updated));
+      } catch {}
+      saveCatalogToIdb('playlists', updated);
+      return updated;
+    });
+    setCategories((prev) => {
+      const updated = prev.filter((c) => c.playlistId !== playlistId);
+      try {
+        localStorage.setItem(STORAGE_KEYS.CUSTOM_CATEGORIES, JSON.stringify(updated));
+      } catch {}
+      saveCatalogToIdb('categories', updated);
+      return updated;
+    });
+    setChannels((prev) => {
+      const updated = prev.filter((ch) => ch.playlistId !== playlistId);
+      try {
+        localStorage.setItem(STORAGE_KEYS.CUSTOM_CHANNELS, JSON.stringify(updated.slice(0, 1000)));
+      } catch {}
+      saveCatalogToIdb('channels', updated);
+      return updated;
+    });
+
+    if (activePlaylistId === playlistId) {
+      const remaining = playlists.filter((p) => p.id !== playlistId);
+      const nextId = remaining.length > 0 ? remaining[0].id : '';
+      setActivePlaylistId(nextId);
+      const nextCh = channels.find((c) => c.playlistId === nextId);
+      setActiveChannel(nextCh || null);
+    }
+  };
+
+  // Filtered Categories for Categories Panel
+  const visibleCategories = useMemo(() => {
+    if (activeSection === 'radio') {
+      const plId = activePlaylistId || 'arn-arabic-radio-2026';
+      return radioCatalog.categories
+        .map((cat) => {
+          const matching = radioCatalog.channels.filter((ch) => ch.categoryId === cat.id);
+          const count = matching.length > 0 ? matching.length : cat.count;
+          return {
+            ...cat,
+            playlistId: plId,
+            count,
+          };
+        })
+        .filter((cat) => {
+          if (catSearch.trim() && !cat.name.toLowerCase().includes(catSearch.trim().toLowerCase())) {
+            return false;
+          }
+          return true;
+        });
+    }
+
+    if (!activePlaylistId) return [];
+    const baseSection = activeSection === 'fav' || activeSection === 'history' ? null : activeSection;
+    return categories.filter((cat) => {
+      if (cat.playlistId !== activePlaylistId) return false;
+      if (baseSection && cat.section !== baseSection) return false;
+      if (catSearch.trim() && !cat.name.toLowerCase().includes(catSearch.trim().toLowerCase())) {
+        return false;
+      }
+      return true;
+    });
+  }, [categories, activePlaylistId, activeSection, catSearch, radioCatalog]);
+
+  // Filtered Channels for Channels Panel
+  const visibleChannels = useMemo(() => {
+    if (activeSection === 'radio') {
+      const plId = activePlaylistId || 'arn-arabic-radio-2026';
+      let list = radioCatalog.channels.map((ch) => ({ ...ch, playlistId: plId }));
+      if (selectedCategoryId !== 'ALL') {
+        list = list.filter((ch) => ch.categoryId === selectedCategoryId);
+      }
+      if (onlyFavFilter) {
+        list = list.filter((ch) => favoriteIds.includes(ch.id));
+      }
+      if (chSearch.trim()) {
+        const q = chSearch.trim().toLowerCase();
+        list = list.filter(
+          (ch) => ch.name.toLowerCase().includes(q) || ch.groupTitle.toLowerCase().includes(q)
+        );
+      }
+      return list;
+    }
+
+    if (playlists.length === 0) return [];
+    let list = channels.filter((ch) => ch.playlistId === activePlaylistId);
+
+    if (activeSection === 'fav') {
+      list = channels.filter((ch) => favoriteIds.includes(ch.id));
+    } else if (activeSection === 'history') {
+      list = historyIds
+        .map((id) => channels.find((c) => c.id === id))
+        .filter(Boolean);
+    } else {
+      list = list.filter((ch) => ch.section === activeSection);
+    }
+
+    if (selectedCategoryId !== 'ALL') {
+      const selectedCat = categories.find(
+        (c) => c.id === selectedCategoryId && c.playlistId === activePlaylistId
+      );
+      const isEgyptCategory =
+        selectedCat &&
+        (selectedCat.name.includes('مصر') ||
+          selectedCat.id.toLowerCase().includes('eg') ||
+          selectedCat.id.toLowerCase().includes('20') ||
+          selectedCat.name.toLowerCase().includes('egypt'));
+
+      list = list.filter((ch) => {
+        if (ch.categoryId === selectedCategoryId) return true;
+        if (
+          isEgyptCategory &&
+          (ch.groupTitle?.includes('مصر') ||
+            ch.categoryId?.toLowerCase().includes('eg') ||
+            ch.categoryId?.toLowerCase().includes('20'))
+        ) {
+          return true;
+        }
+        return false;
+      });
+    }
+
+    if (onlyFavFilter) {
+      list = list.filter((ch) => favoriteIds.includes(ch.id));
+    }
+
+    if (chSearch.trim()) {
+      const q = chSearch.trim().toLowerCase();
+      list = list.filter(
+        (ch) => ch.name.toLowerCase().includes(q) || ch.groupTitle?.toLowerCase().includes(q)
+      );
+    }
+
+    return list;
+  }, [
+    channels,
+    activePlaylistId,
+    activeSection,
+    selectedCategoryId,
+    onlyFavFilter,
+    chSearch,
+    favoriteIds,
+    historyIds,
+    playlists.length,
+    categories,
+    radioCatalog.channels,
+  ]);
+
+  const currentCategoryObj = useMemo(() => {
+    if (selectedCategoryId === 'ALL') return null;
+    return (
+      categories.find((c) => c.id === selectedCategoryId) ||
+      radioCatalog.categories.find((c) => c.id === selectedCategoryId) ||
+      null
+    );
+  }, [selectedCategoryId, categories, radioCatalog.categories]);
+
+  const currentCategoryVisual = useMemo(() => {
+    if (!currentCategoryObj) return null;
+    return getCategoryVisual(
+      currentCategoryObj.name,
+      currentCategoryObj.remoteTopic,
+      currentCategoryObj.icon,
+      currentCategoryObj.flag
+    );
+  }, [currentCategoryObj]);
+
+  const currentCategoryTitle = useMemo(() => {
+    if (activeSection === 'fav') return 'المفضلة المحفوظة';
+    if (activeSection === 'history') return 'سجل المشاهدة الأخيرة';
+    if (selectedCategoryId === 'ALL') {
+      if (activeSection === 'live') return 'كل القنوات المباشرة';
+      if (activeSection === 'radio') return 'إذاعات الراديو والقرآن الكريم';
+      if (activeSection === 'movies') return 'كل الأفلام (VOD)';
+      return 'كل المسلسلات والحلقات';
+    }
+    return currentCategoryObj?.name || 'الكل';
+  }, [activeSection, selectedCategoryId, currentCategoryObj]);
 
   return (
-    <div 
-      ref={containerRef}
-      className={`min-h-screen relative flex flex-col ${
-        isMaximized 
-          ? 'fixed inset-0 z-[100] bg-black' 
-          : isDark ? 'bg-[#04060b] text-white' : 'bg-bg text-text'
-      }`}
-    >
-      {/* Dynamic TopBar (only in non-cinema mode) */}
-      {!isMaximized && <TopBar />}
+    <div className={`h-screen w-screen overflow-hidden flex flex-col select-none transition-colors duration-300 ${
+      isDark ? 'bg-[#070b14] text-slate-100' : 'bg-[#f1f5f9] text-slate-800'
+    }`}>
+      {/* Global ARN-Stream TopBar (hidden when in Cinema Mode) */}
+      {!isCinemaMode && <TopBar />}
 
-      {/* Cosmic background decoration */}
-      {!isMaximized && isDark && (
-        <>
-          <CosmicBackground density="medium" />
-          <div className="absolute top-16 left-1/2 -translate-x-1/2 w-[900px] h-[350px] bg-[radial-gradient(ellipse_at_top,rgba(239,68,68,0.15),transparent_70%)] blur-2xl pointer-events-none" />
-        </>
-      )}
+      {/* Main IPTV Workspace */}
+      <div className="flex-1 flex min-h-0 overflow-hidden p-2.5 gap-2.5 relative">
+        {/* Tactile Navigation Rail */}
+        <aside className={`w-20 backdrop-blur-xl border rounded-2xl flex flex-col items-center justify-between py-3 shrink-0 transition-colors duration-200 ${
+          isDark
+            ? 'bg-[#0f172a]/75 border-white/[0.06] shadow-2xl'
+            : 'bg-white/85 border-slate-200/80 shadow-lg shadow-slate-200/50'
+        }`}>
+          <div className="flex flex-col items-center gap-1 w-full px-1.5">
+            <button
+              type="button"
+              onClick={() => setActiveSection('live')}
+              className={`w-full flex flex-col items-center gap-1 py-2.5 px-1 rounded-[10px] text-[11px] font-semibold transition-all duration-150 cursor-pointer whitespace-nowrap ${
+                activeSection === 'live'
+                  ? 'bg-violet-600 text-white shadow-sm shadow-violet-600/25'
+                  : isDark
+                  ? 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <Tv className={`w-4 h-4 ${activeSection === 'live' ? 'text-violet-200' : ''}`} />
+              <span>البث</span>
+            </button>
 
-      {/* Main Content Area */}
-      <main className={`flex-1 flex flex-col ${isMaximized ? 'p-0' : 'px-3 sm:px-6 lg:px-10 pt-2 sm:pt-4 pb-12'} relative z-10 max-w-7xl mx-auto w-full`}>
-        
-        {/* Header Bar & Live Controls (Shown in Normal Mode) */}
-        {!isMaximized && (
-          <div className="relative z-50 flex flex-col md:flex-row md:items-center justify-between gap-3 mb-3 animate-fadeIn">
-            {/* Title & Live Status Indicator */}
-            <div className="flex items-center gap-3">
-              <div className={`relative w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-gradient-to-tr from-red-600/30 to-red-500/10 border border-red-500/40 flex items-center justify-center text-red-500 ${
-                isDark ? 'shadow-[0_0_20px_rgba(239,68,68,0.25)]' : 'shadow-sm'
-              }`}>
-                <Tv2 size={22} className="animate-pulse" />
-                <span className="absolute -top-1 -end-1 flex h-3 w-3">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                  <span className={`relative inline-flex rounded-full h-3 w-3 bg-red-600 border-2 ${isDark ? 'border-[#04060b]' : 'border-white'}`}></span>
-                </span>
-              </div>
-              
+            <button
+              type="button"
+              onClick={() => setActiveSection('radio')}
+              className={`w-full flex flex-col items-center gap-1 py-2.5 px-1 rounded-[10px] text-[11px] font-semibold transition-all duration-150 cursor-pointer whitespace-nowrap ${
+                activeSection === 'radio'
+                  ? 'bg-violet-600 text-white shadow-sm shadow-violet-600/25'
+                  : isDark
+                  ? 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <Radio className={`w-4 h-4 ${activeSection === 'radio' ? 'text-violet-200' : ''}`} />
+              <span>الراديو</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveSection('movies')}
+              className={`w-full flex flex-col items-center gap-1 py-2.5 px-1 rounded-[10px] text-[11px] font-semibold transition-all duration-150 cursor-pointer whitespace-nowrap ${
+                activeSection === 'movies'
+                  ? 'bg-violet-600 text-white shadow-sm shadow-violet-600/25'
+                  : isDark
+                  ? 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <Film className={`w-4 h-4 ${activeSection === 'movies' ? 'text-violet-200' : ''}`} />
+              <span>الأفلام</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveSection('series')}
+              className={`w-full flex flex-col items-center gap-1 py-2.5 px-1 rounded-[10px] text-[11px] font-semibold transition-all duration-150 cursor-pointer whitespace-nowrap ${
+                activeSection === 'series'
+                  ? 'bg-violet-600 text-white shadow-sm shadow-violet-600/25'
+                  : isDark
+                  ? 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <Layers className={`w-4 h-4 ${activeSection === 'series' ? 'text-violet-200' : ''}`} />
+              <span>المسلسلات</span>
+            </button>
+
+            {/* Categories Fold / Expand Button */}
+            <button
+              type="button"
+              onClick={() => setIsCategoriesOpen((prev) => !prev)}
+              className={`w-full flex flex-col items-center gap-1 py-2.5 px-1 rounded-[10px] text-[11px] font-semibold transition-all duration-150 cursor-pointer whitespace-nowrap ${
+                isCategoriesOpen
+                  ? (isDark ? 'bg-violet-600/25 text-violet-300 border border-violet-500/35 shadow-sm shadow-violet-600/20' : 'bg-violet-100 text-violet-700 border border-violet-300 font-bold')
+                  : isDark
+                  ? 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+              title="عرض أو إخفاء قائمة التصنيفات"
+            >
+              <FolderOpen className={`w-4 h-4 ${isCategoriesOpen ? 'text-violet-400' : ''}`} />
+              <span>التصنيفات</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveSection('fav')}
+              className={`w-full flex flex-col items-center gap-1 py-2.5 px-1 rounded-[10px] text-[11px] font-semibold transition-all duration-150 cursor-pointer whitespace-nowrap ${
+                activeSection === 'fav'
+                  ? 'bg-violet-600 text-white shadow-sm shadow-violet-600/25'
+                  : isDark
+                  ? 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <Star className={`w-4 h-4 ${activeSection === 'fav' ? 'text-violet-200' : ''}`} />
+              <span>المفضلة</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveSection('history')}
+              className={`w-full flex flex-col items-center gap-1 py-2.5 px-1 rounded-[10px] text-[11px] font-semibold transition-all duration-150 cursor-pointer whitespace-nowrap ${
+                activeSection === 'history'
+                  ? 'bg-violet-600 text-white shadow-sm shadow-violet-600/25'
+                  : isDark
+                  ? 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <History className={`w-4 h-4 ${activeSection === 'history' ? 'text-violet-200' : ''}`} />
+              <span>الأخيرة</span>
+            </button>
+          </div>
+
+          <div className={`flex flex-col items-center gap-1 w-full px-1.5 pt-2 border-t ${isDark ? 'border-white/[0.06]' : 'border-slate-200'}`}>
+            <button
+              id="btnPlaylists"
+              type="button"
+              onClick={() => setIsPlaylistModalOpen(true)}
+              className={`w-full flex flex-col items-center gap-1 py-2 px-1 rounded-[10px] text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                isDark
+                  ? 'text-slate-300 hover:text-white hover:bg-white/[0.05]'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+              title="إدارة القوائم وأكواد التفعيل (FG / Xtream / M3U)"
+            >
+              <KeyRound className="w-4 h-4 text-violet-400" />
+              <span>الاشتراكات</span>
+            </button>
+
+            {/* Quick Theme Switcher Button */}
+            <button
+              type="button"
+              onClick={() => setTheme(isDark ? 'light' : 'dark')}
+              className={`w-full flex flex-col items-center gap-1 py-2 px-1 rounded-[10px] text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                isDark
+                  ? 'text-slate-400 hover:text-amber-300 hover:bg-white/[0.05]'
+                  : 'text-slate-600 hover:text-amber-600 hover:bg-slate-100'
+              }`}
+              title={isDark ? 'التبديل إلى الوضع الفاتح (النهاري)' : 'التبديل إلى الوضع الداكن (الليلي)'}
+            >
+              {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-700" />}
+              <span>{isDark ? 'فاتح' : 'داكن'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsCinemaMode((prev) => !prev)}
+              className={`w-full flex flex-col items-center gap-1 py-2 px-1 rounded-[10px] text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                isCinemaMode
+                  ? (isDark ? 'bg-violet-600/25 text-violet-300 border border-violet-500/40' : 'bg-violet-100 text-violet-700 border border-violet-300 font-bold')
+                  : isDark
+                  ? 'text-slate-400 hover:text-white hover:bg-white/[0.05]'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+              title={isCinemaMode ? 'إظهار الشريط العلوي' : 'الوضع السينمائي الواسع'}
+            >
+              {isCinemaMode ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+              <span>{isCinemaMode ? 'عادي' : 'سينمائي'}</span>
+            </button>
+          </div>
+        </aside>
+
+        {/* Collapsible Categories Panel */}
+        {isCategoriesOpen && (
+          <section className={`w-64 lg:w-72 border rounded-2xl flex flex-col overflow-hidden shrink-0 shadow-2xl z-20 animate-fadeIn transition-colors duration-200 ${
+            isDark ? 'bg-[#0f172a]/95 border-white/10' : 'bg-white/95 border-slate-200 shadow-slate-200/50'
+          }`}>
+            <div className={`flex items-center justify-between px-4 py-3 border-b ${
+              isDark ? 'border-white/[0.08]' : 'border-slate-200'
+            }`}>
               <div className="flex items-center gap-2">
-                <h1 className={`text-xl sm:text-2xl font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                  {t('liveTv.title')}
-                </h1>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-red-600 text-white shadow-sm shadow-red-600/50 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
-                  {t('liveTv.badge')}
-                </span>
+                <FolderOpen className="w-4 h-4 text-violet-400" />
+                <h3 className={`text-xs font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>التصنيفات</h3>
               </div>
-            </div>
-
-            {/* Action Tools Toolbar */}
-            <div className="flex flex-wrap items-center gap-2">
-              {/* FG Code Badge with 1-click Copy */}
-              <button
-                type="button"
-                onClick={handleCopyFgCode}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-bold transition shadow-sm group active:scale-95 ${
-                  isDark
-                    ? 'bg-gradient-to-r from-red-600/20 via-amber-600/15 to-red-600/20 hover:from-red-600/30 hover:to-amber-600/30 border-red-500/40 text-white'
-                    : 'bg-red-50 hover:bg-red-100 border-red-200 text-red-800'
-                }`}
-                title={isRtl ? 'اضغط لنسخ كود التفعيل 232425' : 'Click to copy FG Code 232425'}
-              >
-                <KeyRound size={14} className={isDark ? 'text-amber-400' : 'text-red-500'} />
-                <span className={isDark ? 'text-white/70' : 'text-red-600/70'}>{isRtl ? 'كود FG:' : 'FG Code:'}</span>
-                <span className={`font-mono font-black tracking-wider text-sm ${isDark ? 'text-amber-300' : 'text-red-700'}`}>{DEFAULT_FG_CODE}</span>
-                {copied ? (
-                  <span className="text-emerald-500 text-[11px] font-bold flex items-center gap-1 ms-1 animate-fadeIn">
-                    <Check size={13} /> {isRtl ? 'تم النسخ' : 'Copied'}
-                  </span>
-                ) : (
-                  <Copy size={13} className={isDark ? 'text-white/50 group-hover:text-white ms-1' : 'text-red-400 group-hover:text-red-600 ms-1'} />
-                )}
-              </button>
-
-              {/* Viewport Mode Switcher (Wide vs Mobile) */}
-              <button
-                type="button"
-                onClick={() => setViewMode(m => m === 'wide' ? 'mobile' : 'wide')}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs sm:text-sm font-medium transition backdrop-blur-md shadow-sm ${
-                  isDark ? 'bg-white/10 hover:bg-white/15 border-white/10 text-white' : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700'
-                }`}
-                title={viewMode === 'wide' ? (isRtl ? 'مقاس الهاتف' : 'Mobile View') : (isRtl ? 'عرض عريض' : 'Wide View')}
-              >
-                {viewMode === 'wide' ? <Smartphone size={14} className="text-sky-500" /> : <Monitor size={14} className="text-sky-500" />}
-                <span className="hidden sm:inline">{viewMode === 'wide' ? (isRtl ? 'مقاس الهاتف' : 'Mobile View') : (isRtl ? 'عرض عريض' : 'Wide View')}</span>
-              </button>
-
-              {/* Server Selector Dropdown */}
-              <div className="relative">
+              <div className="flex items-center gap-2">
+                <span className={`text-xs font-mono tabular-nums ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  {visibleCategories.length} {activeSection === 'radio' ? 'تصنيفات' : 'فئة'}
+                </span>
                 <button
                   type="button"
-                  onClick={() => setShowServerMenu(v => !v)}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs sm:text-sm font-medium transition backdrop-blur-md shadow-sm ${
-                    isDark ? 'bg-white/10 hover:bg-white/15 border-white/10 text-white' : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700'
+                  onClick={() => setIsCategoriesOpen(false)}
+                  className={`p-1 rounded-lg transition-colors cursor-pointer ${
+                    isDark ? 'text-slate-400 hover:text-white hover:bg-white/10' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
                   }`}
-                  title={t('liveTv.changeServer')}
+                  title="إغلاق قائمة التصنيفات"
                 >
-                  <Server size={14} className="text-red-500" />
-                  <span className="truncate max-w-[140px] sm:max-w-[170px]">
-                    {PRESET_SERVERS.find(s => s.url === activeUrl)?.label || activeUrl.replace(/^https?:\/\//, '')}
-                  </span>
-                  <ChevronDown size={14} className={`transition-transform duration-200 ${showServerMenu ? 'rotate-180' : ''}`} />
+                  <X className="w-4 h-4" />
                 </button>
-
-                {showServerMenu && (
-                  <>
-                    <div 
-                      className="fixed inset-0 z-40 cursor-default" 
-                      onClick={() => setShowServerMenu(false)} 
-                    />
-                    <div className={`absolute top-full mt-2 ${isRtl ? 'right-0' : 'left-0'} w-72 rounded-2xl backdrop-blur-2xl border shadow-2xl p-2 z-50 animate-fadeIn ${
-                      isDark ? 'bg-[#0f172a]/95 border-white/15' : 'bg-white/95 border-slate-200'
-                    }`}>
-                      <div className={`text-[11px] font-bold px-3 py-1.5 uppercase tracking-wider ${isDark ? 'text-white/50' : 'text-slate-400'}`}>
-                        {t('liveTv.changeServer')}
-                      </div>
-                      {PRESET_SERVERS.map(srv => (
-                        <button
-                          key={srv.id}
-                          type="button"
-                          onClick={() => handleSelectServer(srv.url)}
-                          className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs transition ${
-                            activeUrl === srv.url 
-                              ? (isDark ? 'bg-red-600/30 text-white font-bold border border-red-500/40 shadow-sm' : 'bg-red-50 text-red-700 font-bold border border-red-200 shadow-sm')
-                              : (isDark ? 'text-white/80 hover:bg-white/10 hover:text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900')
-                          }`}
-                        >
-                          <span className="truncate text-start">{srv.label}</span>
-                          {activeUrl === srv.url && (
-                            <span className="w-2 h-2 rounded-full bg-red-500 shadow-sm shadow-red-400 shrink-0 ms-2"></span>
-                          )}
-                        </button>
-                      ))}
-                      <div className={`border-t my-1 pt-1 ${isDark ? 'border-white/10' : 'border-slate-100'}`}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowServerMenu(false);
-                            setShowCustomModal(true);
-                          }}
-                          className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs transition ${
-                            isDark ? 'text-white/80 hover:bg-white/10 hover:text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                          }`}
-                        >
-                          <Radio size={14} className="text-red-500" />
-                          <span>{t('liveTv.customServer')}</span>
-                        </button>
-                      </div>
-                    </div>
-                  </>
-                )}
               </div>
-
-              {/* Reload Stream Button */}
-              <button
-                type="button"
-                onClick={handleReload}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs sm:text-sm font-medium transition backdrop-blur-md shadow-sm group ${
-                  isDark ? 'bg-white/10 hover:bg-white/15 border-white/10 text-white' : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700'
-                }`}
-                title={`${t('liveTv.reload')} (R)`}
-              >
-                <RotateCw size={14} className={`group-hover:rotate-180 transition-transform duration-500 ${isLoading ? 'animate-spin text-red-500' : ''}`} />
-                <span className="hidden sm:inline">{t('liveTv.reload')}</span>
-              </button>
-
-              {/* Cinema Mode Button */}
-              <button
-                type="button"
-                onClick={() => setIsCinemaMode(true)}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs sm:text-sm font-medium transition backdrop-blur-md shadow-sm ${
-                  isDark ? 'bg-white/10 hover:bg-white/15 border-white/10 text-white' : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700'
-                }`}
-                title={`${t('liveTv.cinemaMode')} (C)`}
-              >
-                <Tv size={14} className={isDark ? 'text-amber-400' : 'text-amber-600'} />
-                <span className="hidden sm:inline">{t('liveTv.cinemaMode')}</span>
-              </button>
-
-              {/* Fullscreen Button */}
-              <button
-                type="button"
-                onClick={toggleFullscreen}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs sm:text-sm font-medium transition backdrop-blur-md shadow-sm ${
-                  isDark ? 'bg-white/10 hover:bg-white/15 border-white/10 text-white' : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700'
-                }`}
-                title={`${isFullscreen ? t('liveTv.exitFullscreen') : t('liveTv.fullscreen')} (F)`}
-              >
-                {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-                <span className="hidden md:inline">{isFullscreen ? t('liveTv.exitFullscreen') : t('liveTv.fullscreen')}</span>
-              </button>
-
-              {/* Open in External Tab Button */}
-              <button
-                type="button"
-                onClick={handleOpenExternal}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs sm:text-sm font-medium transition backdrop-blur-md shadow-sm ${
-                  isDark ? 'bg-white/10 hover:bg-white/15 border-white/10 text-white' : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700'
-                }`}
-                title={t('liveTv.openExternal')}
-              >
-                <ExternalLink size={14} />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Tip Banner removed — cleaner UI */}
-
-        {/* Floating Controls Bar (Appears ONLY in Cinema Mode/Fullscreen) */}
-        {isMaximized && (
-          <div className="absolute top-4 inset-x-4 z-50 flex items-center justify-between p-3 rounded-2xl bg-black/70 backdrop-blur-xl border border-white/15 shadow-2xl transition-opacity hover:opacity-100 opacity-80">
-            <div className="flex items-center gap-3">
-              <span className="flex h-3 w-3 relative">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600"></span>
-              </span>
-              <span className="font-bold text-sm text-white flex items-center gap-2">
-                <span>{t('liveTv.title')}</span>
-                <span className="text-xs font-mono text-amber-300 font-bold bg-white/10 px-2 py-0.5 rounded">FG: {DEFAULT_FG_CODE}</span>
-              </span>
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleReload}
-                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition"
-                title={t('liveTv.reload')}
-              >
-                <RotateCw size={16} className={isLoading ? 'animate-spin' : ''} />
-              </button>
-              <button
-                type="button"
-                onClick={toggleFullscreen}
-                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition"
-                title={t('liveTv.fullscreen')}
-              >
-                {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-              </button>
+            <div className={`p-2.5 border-b ${isDark ? 'border-white/[0.08]' : 'border-slate-200'}`}>
+              <div className="relative">
+                <Search className={`w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none ${
+                  isDark ? 'text-slate-400' : 'text-slate-500'
+                }`} />
+                <input
+                  id="catSearchInput"
+                  type="text"
+                  value={catSearch}
+                  onChange={(e) => setCatSearch(e.target.value)}
+                  placeholder="بحث في التصنيفات..."
+                  className={`w-full border rounded-lg pr-8 pl-3 py-1.5 text-xs focus:outline-none transition-colors ${
+                    isDark
+                      ? 'bg-[#070b14] border-white/10 text-slate-100 placeholder:text-slate-500 focus:border-violet-500/60'
+                      : 'bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-violet-500'
+                  }`}
+                />
+              </div>
+            </div>
+
+            <div id="categoriesList" className="flex-1 overflow-y-auto p-2 space-y-1">
+              {/* All Channels Option */}
               <button
                 type="button"
                 onClick={() => {
-                  setIsCinemaMode(false);
-                  if (document.fullscreenElement) document.exitFullscreen();
+                  setSelectedCategoryId('ALL');
+                  setIsCategoriesOpen(false);
                 }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs shadow-lg transition active:scale-95"
-                title={`${t('liveTv.exitCinema')} (Esc)`}
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                  selectedCategoryId === 'ALL'
+                    ? (isDark ? 'bg-violet-600/20 text-violet-300 border border-violet-500/40' : 'bg-violet-100 text-violet-800 border border-violet-300 font-bold')
+                    : (isDark ? 'text-slate-300 hover:bg-white/5' : 'text-slate-700 hover:bg-slate-100')
+                }`}
               >
-                <Minimize2 size={14} />
-                <span>{t('liveTv.exitCinema')}</span>
+                <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                  <div className="w-6 h-6 rounded-md bg-violet-600/25 text-violet-400 flex items-center justify-center shrink-0 border border-violet-500/35">
+                    <Layers className="w-3.5 h-3.5" />
+                  </div>
+                  <span className="truncate">
+                    {activeSection === 'radio' ? 'الكل (جميع الإذاعات)' : 'الكل (جميع القنوات)'}
+                  </span>
+                </div>
+                <span className={`text-[11px] font-mono tabular-nums shrink-0 mr-1 ${
+                  isDark ? 'text-slate-400' : 'text-slate-500'
+                }`}>
+                  {activeSection === 'radio'
+                    ? radioCatalog.channels.length
+                    : channels.filter(
+                        (c) =>
+                          c.playlistId === activePlaylistId &&
+                          (activeSection === 'fav'
+                            ? favoriteIds.includes(c.id)
+                            : activeSection === 'history'
+                            ? historyIds.includes(c.id)
+                            : c.section === activeSection)
+                      ).length}
+                </span>
               </button>
+
+              {visibleCategories.map((cat) => {
+                const isSelected = selectedCategoryId === cat.id;
+                const visual = getCategoryVisual(cat.name, cat.remoteTopic, cat.icon, cat.flag);
+
+                return (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedCategoryId(cat.id);
+                      setIsCategoriesOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                      isSelected
+                        ? (isDark ? 'bg-violet-600/20 text-violet-300 border border-violet-500/40' : 'bg-violet-100 text-violet-800 border border-violet-300 font-bold')
+                        : (isDark ? 'text-slate-300 hover:bg-white/5' : 'text-slate-700 hover:bg-slate-100')
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      {visual?.type === 'icon' ? (
+                        <div className={`w-8 h-5 rounded overflow-hidden shrink-0 border shadow-sm flex items-center justify-center ${
+                          isDark ? 'border-white/10 bg-black/40' : 'border-slate-200 bg-white'
+                        }`}>
+                          <img
+                            src={visual.src}
+                            alt=""
+                            className="w-full h-full object-contain"
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                            }}
+                          />
+                        </div>
+                      ) : visual?.type === 'flag' ? (
+                        <div className={`w-6 h-4 rounded overflow-hidden shrink-0 border shadow-sm ${
+                          isDark ? 'border-white/15 bg-black/40' : 'border-slate-200 bg-white'
+                        }`}>
+                          <img
+                            src={visual.src}
+                            alt=""
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <FolderOpen className="w-4 h-4 text-violet-400/80 shrink-0" />
+                      )}
+                      <span className="truncate text-right">{cat.name}</span>
+                    </div>
+                    <span className={`text-[11px] font-mono tabular-nums shrink-0 mr-1 ${
+                      isDark ? 'text-slate-400' : 'text-slate-500'
+                    }`}>
+                      {cat.count}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-          </div>
-        )}
 
-        {/* Drama Live Iframe Container */}
-        <div 
-          className={`relative transition-all duration-300 mx-auto ${
-            isMaximized 
-              ? 'w-full h-screen rounded-none' 
-              : viewMode === 'mobile'
-                ? 'w-full max-w-lg min-h-[580px] h-[calc(100vh-220px)] rounded-3xl overflow-hidden border-2 border-red-500/40 shadow-[0_0_40px_rgba(239,68,68,0.2)] bg-[#090d16]'
-                : 'w-full min-h-[580px] h-[calc(100vh-220px)] rounded-3xl overflow-hidden border border-red-500/30 shadow-[0_0_35px_rgba(239,68,68,0.15)] bg-[#090d16]'
-          }`}
-        >
-          {/* Loading Indicator Overlay */}
-          {isLoading && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#090d16] z-20">
-              <div className="relative mb-4">
-                <div className="w-14 h-14 rounded-full border-4 border-red-500/20 border-t-red-500 animate-spin" />
-                <Tv2 size={24} className="absolute inset-0 m-auto text-red-500 animate-pulse" />
-              </div>
-              <p className="text-sm font-semibold text-white/80 animate-pulse">
-                {isRtl ? 'جاري الاتصال وتفعيل قنوات البث المباشر (كود 232425)...' : 'Connecting to Drama Live Stream (Code: 232425)...'}
-              </p>
-              <span className="text-xs text-amber-400 font-mono mt-1">
-                FG Activation Code: {DEFAULT_FG_CODE}
-              </span>
-            </div>
-          )}
-
-          {/* Embedded Drama Live Flutter Web Frame */}
-          <iframe
-            key={iframeKey}
-            ref={iframeRef}
-            src={activeUrl}
-            title="Drama Live Web Player"
-            onLoad={() => setIsLoading(false)}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
-            allowFullScreen
-            referrerPolicy="no-referrer-when-downgrade"
-            className="w-full h-full border-0 relative z-10"
-          />
-        </div>
-
-        {/* Quick Tips / Instructions Card (Collapsible) */}
-        {!isMaximized && showTips && (
-          <div className="mt-4 p-4 sm:p-5 rounded-2xl bg-white/[0.04] backdrop-blur-xl border border-white/10 animate-fadeIn">
-            <div className="flex items-center gap-2 mb-3 text-red-400 font-bold text-sm">
-              <Sparkles size={16} />
-              <span>{t('liveTv.tipsTitle')}</span>
-            </div>
-            <ul className="space-y-2 text-xs sm:text-sm text-white/70 list-disc list-inside">
-              <li>{isRtl ? `كود التفعيل الأساسي المدمج هو: ${DEFAULT_FG_CODE}` : `Default FG Activation Code is: ${DEFAULT_FG_CODE}`}</li>
-              <li>{t('liveTv.tip1')}</li>
-              <li>{t('liveTv.tip2')}</li>
-              <li>{t('liveTv.tip3')}</li>
-            </ul>
-          </div>
-        )}
-      </main>
-
-      {/* Custom URL Modal */}
-      {showCustomModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
-          <div className="w-full max-w-md rounded-2xl bg-[#0f172a] border border-white/15 p-6 shadow-2xl">
-            <h3 className="text-base font-bold text-white mb-2 flex items-center gap-2">
-              <Radio size={18} className="text-red-400" />
-              <span>{t('liveTv.customServer')}</span>
-            </h3>
-            <p className="text-xs text-white/60 mb-4">
-              {t('liveTv.enterCustomUrl')}
-            </p>
-            <form onSubmit={handleApplyCustomUrl} className="space-y-4">
-              <input
-                type="text"
-                value={customUrlInput}
-                onChange={e => setCustomUrlInput(e.target.value)}
-                placeholder="https://..."
-                className="w-full h-10 rounded-xl bg-black/40 border border-white/20 px-3 text-sm text-white focus:outline-none focus:border-red-500 transition"
-                autoFocus
-              />
-              <div className="flex items-center justify-end gap-2">
+            {/* Active Playlist Switcher Footer */}
+            {playlists.length > 0 && (
+              <div className={`p-2.5 border-t flex items-center justify-between gap-2 ${
+                isDark ? 'bg-[#070b14]/80 border-white/[0.08]' : 'bg-slate-50 border-slate-200'
+              }`}>
+                <div className="min-w-0">
+                  <div className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>القائمة النشطة:</div>
+                  <div className="text-xs font-bold text-violet-500 truncate">
+                    {playlists.find((p) => p.id === activePlaylistId)?.name || 'افتراضي'}
+                  </div>
+                </div>
                 <button
                   type="button"
-                  onClick={() => setShowCustomModal(false)}
-                  className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs text-white transition"
+                  onClick={() => setIsPlaylistModalOpen(true)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
+                    isDark ? 'bg-white/[0.08] hover:bg-white/15 text-slate-200' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'
+                  }`}
                 >
-                  {t('actions.cancel')}
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-xs font-bold text-white shadow-md transition"
-                >
-                  {t('liveTv.applyUrl')}
+                  تغيير
                 </button>
               </div>
-            </form>
+            )}
+          </section>
+        )}
+
+        {/* Channels List Panel */}
+        <section className={`w-80 lg:w-96 backdrop-blur-xl border rounded-2xl flex flex-col overflow-hidden shrink-0 transition-colors duration-200 ${
+          isDark ? 'bg-[#0f172a]/75 border-white/[0.06]' : 'bg-white/85 border-slate-200/80 shadow-lg shadow-slate-200/50'
+        }`}>
+          {/* Prominent TV / Radio Mode Switcher Pill Bar */}
+          <div className={`p-2 border-b flex items-center gap-1.5 ${
+            isDark ? 'bg-[#0a101f]/90 border-white/[0.06]' : 'bg-slate-50/90 border-slate-200'
+          }`}>
+            <div className={`flex-1 grid grid-cols-2 gap-1 p-1 rounded-xl border ${
+              isDark ? 'bg-[#060912] border-white/[0.07]' : 'bg-slate-200/70 border-slate-300/60'
+            }`}>
+              <button
+                type="button"
+                onClick={() => setActiveSection('live')}
+                className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition-all duration-200 cursor-pointer ${
+                  activeSection !== 'radio'
+                    ? 'bg-[#7c3aed] text-white shadow-md shadow-violet-600/35'
+                    : isDark
+                    ? 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                }`}
+              >
+                <Tv className="w-3.5 h-3.5 shrink-0" />
+                <span>قنوات التلفاز</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSection('radio')}
+                className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition-all duration-200 cursor-pointer ${
+                  activeSection === 'radio'
+                    ? 'bg-[#7c3aed] text-white shadow-md shadow-violet-600/35'
+                    : isDark
+                    ? 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                }`}
+              >
+                <Radio className="w-3.5 h-3.5 shrink-0" />
+                <span>إذاعات الراديو</span>
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsPlaylistModalOpen(true)}
+              className={`p-2.5 rounded-xl border transition-colors cursor-pointer shrink-0 ${
+                isDark
+                  ? 'bg-white/[0.05] hover:bg-white/[0.1] border-white/[0.08] text-violet-400 hover:text-violet-300'
+                  : 'bg-white hover:bg-slate-100 border-slate-200 text-violet-600 hover:text-violet-700 shadow-xs'
+              }`}
+              title="إدارة القوائم وأكواد التفعيل (FG / Xtream / M3U)"
+            >
+              <ListPlus className="w-4 h-4" />
+            </button>
           </div>
-        </div>
-      )}
+
+          <div className={`flex items-center justify-between px-4 py-2.5 border-b ${
+            isDark ? 'border-white/[0.06]' : 'border-slate-200'
+          }`}>
+            <div className="flex items-center gap-2 min-w-0">
+              <button
+                type="button"
+                onClick={() => setIsCategoriesOpen((prev) => !prev)}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold truncate transition-colors cursor-pointer ${
+                  isDark
+                    ? 'bg-white/[0.04] hover:bg-white/[0.08] border-white/[0.07] text-slate-100'
+                    : 'bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-800'
+                }`}
+                title="اضغط لاختيار تصنيف آخر"
+              >
+                {currentCategoryVisual?.type === 'icon' ? (
+                  <div className={`w-6 h-4 rounded overflow-hidden shrink-0 border flex items-center justify-center ${
+                    isDark ? 'border-white/10 bg-black/40' : 'border-slate-200 bg-white'
+                  }`}>
+                    <img src={currentCategoryVisual.src} alt="" className="w-full h-full object-contain" />
+                  </div>
+                ) : currentCategoryVisual?.type === 'flag' ? (
+                  <div className={`w-6 h-4 rounded overflow-hidden shrink-0 border ${
+                    isDark ? 'border-white/15 bg-black/40' : 'border-slate-200 bg-white'
+                  }`}>
+                    <img src={currentCategoryVisual.src} alt="" className="w-full h-full object-cover" />
+                  </div>
+                ) : null}
+                <span className="truncate max-w-[9rem]">{currentCategoryTitle}</span>
+                <ChevronDown className={`w-3.5 h-3.5 shrink-0 ${isDark ? 'text-slate-400' : 'text-slate-500'}`} />
+              </button>
+            </div>
+            <span id="chCountBadge" className={`text-xs font-mono tabular-nums shrink-0 ${
+              isDark ? 'text-slate-400' : 'text-slate-500'
+            }`}>
+              {visibleChannels.length} {activeSection === 'radio' ? 'إذاعة' : 'قناة'}
+            </span>
+          </div>
+
+          {/* Search & Favorites Filter Toolbar */}
+          <div className={`p-2.5 border-b flex items-center gap-2 ${
+            isDark ? 'border-white/[0.06]' : 'border-slate-200'
+          }`}>
+            <div className="relative flex-1">
+              <Search className={`w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none ${
+                isDark ? 'text-slate-400' : 'text-slate-500'
+              }`} />
+              <input
+                id="chSearchInput"
+                type="text"
+                value={chSearch}
+                onChange={(e) => setChSearch(e.target.value)}
+                placeholder={activeSection === 'radio' ? 'ابحث عن إذاعة راديو...' : 'ابحث عن قناة...'}
+                className={`w-full border rounded-lg pr-8 pl-3 py-1.5 text-xs focus:outline-none transition-colors ${
+                  isDark
+                    ? 'bg-[#070b14]/80 border-white/[0.07] text-slate-100 placeholder:text-slate-500 focus:border-violet-500/50'
+                    : 'bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-violet-500'
+                }`}
+              />
+            </div>
+            <button
+              id="btnFavFilter"
+              type="button"
+              onClick={() => setOnlyFavFilter((prev) => !prev)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                onlyFavFilter
+                  ? (isDark ? 'bg-white/[0.1] border-white/20 text-amber-300' : 'bg-amber-50 border-amber-300 text-amber-700 font-bold')
+                  : isDark
+                  ? 'bg-[#070b14]/80 border-white/[0.07] text-slate-400 hover:text-slate-200'
+                  : 'bg-slate-50 border-slate-200 text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              ★ المفضلة
+            </button>
+          </div>
+
+          {/* Channels Scroll List */}
+          <div id="channelsList" className="flex-1 overflow-y-auto p-2 space-y-0.5">
+            {isBootstrapping || loadingCategoryId === selectedCategoryId ? (
+              <div className={`h-full flex flex-col items-center justify-center text-center p-6 space-y-3 ${
+                isDark ? 'text-slate-300' : 'text-slate-700'
+              }`}>
+                <div className="w-6 h-6 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+                <p className={`text-xs font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+                  {isBootstrapping
+                    ? 'جاري تجهيز الباقة العربية والمصرية المدمجة...'
+                    : `جاري جلب قنوات «${currentCategoryTitle}» الحية...`}
+                </p>
+                <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  فك تشفير AES-128-CBC ومزامنة القنوات المباشرة
+                </p>
+              </div>
+            ) : playlists.length === 0 && activeSection !== 'radio' ? (
+              <div className={`h-full flex flex-col items-center justify-center text-center p-6 space-y-3 ${
+                isDark ? 'text-slate-400' : 'text-slate-500'
+              }`}>
+                <Radio className={`w-9 h-9 ${isDark ? 'text-slate-600' : 'text-slate-400'}`} />
+                <p className={`text-xs font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>التطبيق جاهز للتشغيل</p>
+                <p className={`text-[11px] leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  أدخل كود دراما لايف (FG Code) أو قم بتحميل الباقة العربية المدمجة فوراً.
+                </p>
+                <div className="flex flex-col gap-2 w-full">
+                  <button
+                    type="button"
+                    onClick={loadBuiltinCatalog}
+                    className="w-full px-4 py-2 rounded-xl bg-[#7c3aed] hover:bg-[#8b5cf6] text-white font-bold text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-md shadow-violet-600/30"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>تحميل الباقة العربية والمصرية فوراً</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsPlaylistModalOpen(true)}
+                    className={`w-full px-4 py-2 rounded-xl font-semibold text-xs transition-colors cursor-pointer ${
+                      isDark ? 'bg-white/10 hover:bg-white/15 text-slate-200' : 'bg-slate-200 hover:bg-slate-300 text-slate-800'
+                    }`}
+                  >
+                    إضافة كود FG أو قائمة M3U / Xtream
+                  </button>
+                </div>
+              </div>
+            ) : visibleChannels.length === 0 ? (
+              <div className={`h-full flex flex-col items-center justify-center text-center p-6 space-y-2 ${
+                isDark ? 'text-slate-400' : 'text-slate-500'
+              }`}>
+                <Tv className={`w-8 h-8 ${isDark ? 'text-slate-600' : 'text-slate-400'}`} />
+                <p className="text-xs font-semibold">لا توجد قنوات مطابقة للفلتر الحالي</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setChSearch('');
+                    setOnlyFavFilter(false);
+                    setSelectedCategoryId('ALL');
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
+                    isDark ? 'bg-white/[0.06] text-slate-200 hover:bg-white/[0.1]' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                  }`}
+                >
+                  إعادة ضبط الفلاتر
+                </button>
+              </div>
+            ) : (
+              visibleChannels.map((ch, idx) => {
+                const isPlayingNow = activeChannel?.id === ch.id;
+                const isFav = favoriteIds.includes(ch.id);
+                const hasProxyK9x = ch.sources?.some((s) => s.hasK9xSwap);
+
+                return (
+                  <div
+                    key={ch.id}
+                    onClick={() => setActiveChannel(ch)}
+                    className={`group flex items-center justify-between gap-2.5 px-2.5 py-2 rounded-[10px] cursor-pointer transition-colors duration-150 ${
+                      isPlayingNow
+                        ? (isDark ? 'bg-violet-600/20 border border-violet-500/35 text-white shadow-sm' : 'bg-violet-100 border border-violet-300 text-violet-950 font-bold shadow-xs')
+                        : (isDark ? 'hover:bg-white/[0.04] text-slate-300 border border-transparent' : 'hover:bg-slate-100/90 text-slate-700 border border-transparent')
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      {/* Channel Number / Play Indicator */}
+                      <div
+                        className={`w-6 h-6 rounded-md flex items-center justify-center text-[11px] font-mono font-semibold tabular-nums shrink-0 transition-colors ${
+                          isPlayingNow
+                            ? 'bg-[#7c3aed] text-white shadow-sm shadow-violet-600/40'
+                            : isDark
+                            ? 'text-slate-500 group-hover:text-slate-300'
+                            : 'text-slate-400 group-hover:text-slate-700'
+                        }`}
+                      >
+                        {isPlayingNow ? <Play className="w-3 h-3 fill-current" /> : idx + 1}
+                      </div>
+
+                      {/* Channel Logo / Icon with smart fallback */}
+                      {(() => {
+                        const isRadioChannel = ch.section === 'radio' || activeSection === 'radio';
+                        const fallbackSvg = isRadioChannel ? '/ARN-logo.png' : getChannelFallbackLogo(ch.name);
+                        const effectiveLogo = isRadioChannel
+                          ? '/ARN-logo.png'
+                          : ch.logo && !ch.logo.includes('upload.wikimedia.org')
+                            ? ch.logo
+                            : fallbackSvg;
+
+                        return (
+                          <div className={`w-9 h-9 rounded-lg border flex items-center justify-center p-1 overflow-hidden shrink-0 relative ${
+                            isDark ? 'bg-black/40 border-white/[0.07]' : 'bg-white border-slate-200 shadow-xs'
+                          }`}>
+                            <img
+                              src={effectiveLogo}
+                              alt={ch.name}
+                              loading="lazy"
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-contain"
+                              onError={(e) => {
+                                const target = e.currentTarget;
+                                if (target.src !== fallbackSvg) {
+                                  target.src = fallbackSvg;
+                                } else {
+                                  target.style.display = 'none';
+                                  const parent = target.parentElement;
+                                  const fallback = parent?.querySelector('.logo-fallback');
+                                  if (fallback) fallback.style.display = 'flex';
+                                }
+                              }}
+                            />
+                            <div className={`logo-fallback hidden items-center justify-center w-full h-full ${
+                              isDark ? 'text-slate-400' : 'text-slate-500'
+                            }`}>
+                              {ch.section === 'radio' ? (
+                                <Radio className="w-4 h-4" />
+                              ) : (
+                                <Tv className="w-4 h-4" />
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      <div className="min-w-0 flex-1">
+                        <div className={`text-xs font-semibold truncate ${
+                          isPlayingNow
+                            ? (isDark ? 'text-white' : 'text-violet-950 font-bold')
+                            : (isDark ? 'text-slate-200' : 'text-slate-800')
+                        }`}>
+                          {ch.name}
+                        </div>
+                        <div className={`flex items-center gap-1.5 text-[11px] truncate mt-0.5 ${
+                          isDark ? 'text-slate-400' : 'text-slate-500'
+                        }`}>
+                          <span className="truncate">{ch.groupTitle}</span>
+                          {ch.resolution && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span className={`font-mono tabular-nums ${isDark ? 'text-slate-300' : 'text-slate-600'}`} dir="ltr">
+                                {ch.resolution}
+                              </span>
+                            </>
+                          )}
+                          <span aria-hidden="true">·</span>
+                          <span className="font-mono tabular-nums">{ch.sources?.length || 1} سيرفر</span>
+                          {hasProxyK9x && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span className="font-mono text-violet-500 font-bold">FG</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Favorite Star Button */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleFavorite(ch.id);
+                      }}
+                      className={`p-1.5 rounded-lg transition-colors shrink-0 cursor-pointer ${
+                        isFav
+                          ? (isDark ? 'text-amber-400 hover:bg-white/[0.06]' : 'text-amber-500 hover:bg-slate-100')
+                          : (isDark
+                          ? 'text-slate-600 opacity-0 group-hover:opacity-100 hover:text-slate-300 hover:bg-white/[0.06]'
+                          : 'text-slate-400 opacity-0 group-hover:opacity-100 hover:text-slate-600 hover:bg-slate-100')
+                      }`}
+                      title={isFav ? 'إزالة من المفضلة' : 'إضافة إلى المفضلة'}
+                    >
+                      <Star className={`w-3.5 h-3.5 ${isFav ? 'fill-current' : ''}`} />
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </section>
+
+        {/* Column 3: Interactive HLS.js Video Player Container */}
+        <HlsVideoPlayer
+          channel={activeChannel}
+          categoryChannels={visibleChannels}
+          categoryTitle={currentCategoryTitle}
+          activeSection={activeSection}
+          onToggleSection={(sec) => setActiveSection(sec)}
+          onSelectChannel={(ch) => setActiveChannel(ch)}
+          onChannelWatched={handleChannelWatched}
+          onServersLoaded={handleServersLoaded}
+          onOpenPlaylistModal={() => setIsPlaylistModalOpen(true)}
+        />
+      </div>
+
+      {/* Playlist & Activation Modal */}
+      <PlaylistModal
+        isOpen={isPlaylistModalOpen}
+        onClose={() => setIsPlaylistModalOpen(false)}
+        playlists={playlists}
+        activePlaylistId={activePlaylistId}
+        onSelectPlaylist={(id) => {
+          setActivePlaylistId(id);
+          const firstCh = channels.find((c) => c.playlistId === id);
+          if (firstCh) setActiveChannel(firstCh);
+        }}
+        onDeletePlaylist={handleDeletePlaylist}
+        onImportSuccess={handleImportSuccess}
+        onLoadBuiltinCatalog={loadBuiltinCatalog}
+      />
     </div>
   );
 }

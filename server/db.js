@@ -413,6 +413,21 @@ try { db.exec('CREATE INDEX IF NOT EXISTS idx_albums_title ON albums(title);'); 
 try { db.exec('CREATE INDEX IF NOT EXISTS idx_tracks_title ON tracks(title);'); } catch {}
 try { db.exec('CREATE INDEX IF NOT EXISTS idx_playback_state_updated ON playback_state(updated_at DESC);'); } catch {}
 
+// ─── فهارس مركّبة لتسريع تصفح المكتبات (library_id + الترتيب) ───────────────
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_movies_lib_added ON movies(library_id, added_at DESC);'); } catch {}
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_series_lib_added ON series(library_id, added_at DESC);'); } catch {}
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_artists_lib_name ON artists(library_id, name);'); } catch {}
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_albums_lib_added ON albums(library_id, added_at DESC);'); } catch {}
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_tracks_lib_album ON tracks(library_id, album_id);'); } catch {}
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_ratings_media ON ratings(media_type, media_id);'); } catch {}
+
+// ─── إعدادات أداء SQLite القصوى ───────────────────────────────────────────────
+try {
+  db.pragma('cache_size = -64000');     // 64MB page cache
+  db.pragma('temp_store = MEMORY');
+  db.pragma('mmap_size = 268435456');   // 256MB memory-mapped I/O
+} catch {}
+
 export function getSetting(key, defaultValue = null) {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
   return row ? row.value : defaultValue;
@@ -697,6 +712,7 @@ export function getLibraryPreviewCovers(libId, libType, limit = 4) {
           SELECT images.id FROM images
           JOIN artists ON artists.id = images.media_id AND images.media_type = 'artist'
           WHERE artists.library_id = ?
+            AND (images.image_type = 'poster' OR images.image_type = 'avatar')
             AND images.is_primary = 1
           ORDER BY artists.added_at DESC
           LIMIT ?

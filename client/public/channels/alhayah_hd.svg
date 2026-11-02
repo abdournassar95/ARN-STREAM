@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="hayahBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#240516"/>
+      <stop offset="45%" stop-color="#4a082c"/>
+      <stop offset="85%" stop-color="#19030e"/>
+      <stop offset="100%" stop-color="#0a0106"/>
+    </linearGradient>
+    <radialGradient id="hayahGlow" cx="50%" cy="30%" r="65%">
+      <stop offset="0%" stop-color="#e11d48" stop-opacity="0.48"/>
+      <stop offset="50%" stop-color="#be185d" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="magentaGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f43f5e"/>
+      <stop offset="50%" stop-color="#ec4899"/>
+      <stop offset="100%" stop-color="#be185d"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.7"/>
+    </filter>
+  </defs>
+
+  <!-- Background Base -->
+  <rect width="300" height="420" rx="20" fill="url(#hayahBg)"/>
+  <rect width="300" height="420" rx="20" fill="url(#hayahGlow)"/>
+
+  <!-- Crystal Facet Lines -->
+  <path d="M 0 100 L 150 20 L 300 100" stroke="#f43f5e" stroke-width="1.5" stroke-opacity="0.2"/>
+  <circle cx="150" cy="205" r="125" fill="none" stroke="#ec4899" stroke-width="1.2" stroke-opacity="0.18" stroke-dasharray="6 6"/>
+
+  <!-- Top Badges -->
+  <g transform="translate(18, 22)">
+    <rect width="68" height="24" rx="12" fill="#ef4444" filter="url(#shadow)"/>
+    <circle cx="14" cy="12" r="4" fill="#ffffff"/>
+    <text x="36" y="16" fill="#ffffff" font-family="'Cairo', 'Inter', sans-serif" font-weight="900" font-size="11" letter-spacing="1">LIVE</text>
+  </g>
+
+  <g transform="translate(216, 22)">
+    <rect width="66" height="24" rx="6" fill="#000000" fill-opacity="0.65" stroke="#f43f5e" stroke-opacity="0.5" stroke-width="1"/>
+    <text x="33" y="16" fill="#fda4af" font-family="'Inter', sans-serif" font-weight="900" font-size="11" text-anchor="middle">FHD 1080</text>
+  </g>
+
+  <!-- Center Al Hayah Branding -->
+  <g transform="translate(150, 205)" filter="url(#shadow)" text-anchor="middle">
+    <!-- Glowing background plate -->
+    <rect x="-115" y="-76" width="230" height="152" rx="20" fill="#14020c" fill-opacity="0.9" stroke="#e11d48" stroke-opacity="0.4" stroke-width="1.5"/>
+
+    <!-- Al Hayah Arabic Calligraphy -->
+    <text x="0" y="-8" fill="#ffffff" font-family="'Cairo', 'Amiri', sans-serif" font-weight="900" font-size="44" letter-spacing="1">
+      الحيـاة
+    </text>
+
+    <!-- 1 HD Magenta Badge -->
+    <g transform="translate(0, 8)">
+      <rect x="-55" y="0" width="110" height="24" rx="12" fill="url(#magentaGrad)"/>
+      <text x="0" y="17" fill="#ffffff" font-family="'Cairo', 'Inter', sans-serif" font-weight="900" font-size="13" letter-spacing="1">
+        شبكة الحياة 1
+      </text>
+    </g>
+
+    <!-- Subtitle: Screen of all Egyptians -->
+    <g transform="translate(0, 44)">
+      <rect x="-65" y="0" width="130" height="18" rx="9" fill="#000000" fill-opacity="0.6" stroke="#f43f5e" stroke-opacity="0.3" stroke-width="1"/>
+      <text x="0" y="13" fill="#fbcfe8" font-family="'Cairo', sans-serif" font-weight="800" font-size="10" letter-spacing="0.5">
+        شاشة كل المصريين
+      </text>
+    </g>
+  </g>
+
+  <!-- Bottom Details -->
+  <g transform="translate(20, 358)">
+    <text x="0" y="14" fill="#ffffff" font-family="'Cairo', sans-serif" font-weight="800" font-size="16">مسلسلات وبرامج التوك شو</text>
+    <text x="0" y="32" fill="#fbcfe8" font-family="'Cairo', sans-serif" font-weight="600" font-size="12">قناة العائلة الأولى في مصر</text>
+  </g>
+
+  <!-- Subtle Border Rim -->
+  <rect width="298" height="418" x="1" y="1" rx="19" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-opacity="0.15"/>
+</svg>

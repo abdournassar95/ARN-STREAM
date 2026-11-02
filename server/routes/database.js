@@ -20,6 +20,13 @@ import {
   clearLibraryContents,
   createUserDirect
 } from '../services/database-manager.js';
+import {
+  checkLibraryIntegrity,
+  detectRelocatedFiles,
+  applyRelocations,
+  pruneVerifiedMissing,
+  getHealthReport
+} from '../services/library-health.js';
 
 const router = express.Router();
 
@@ -329,6 +336,88 @@ router.post('/users', (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: { code: 'CREATE_USER_ERROR', message: err.message } });
+  }
+});
+
+/**
+ * GET /api/database/health-report
+ * Get library health summary and cached report
+ */
+router.get('/health-report', (req, res) => {
+  try {
+    const report = getHealthReport();
+    res.json({ data: report });
+  } catch (err) {
+    res.status(500).json({ error: { code: 'HEALTH_REPORT_ERROR', message: err.message } });
+  }
+});
+
+/**
+ * POST /api/database/check-integrity
+ * Run a full physical media integrity check (optionally scoped to a single library)
+ */
+router.post('/check-integrity', async (req, res) => {
+  try {
+    const libraryId = req.body?.libraryId ? Number(req.body.libraryId) : null;
+    const result = await checkLibraryIntegrity({ libraryId });
+    res.json({
+      data: result,
+      message: `تم فحص ${result.totalChecked} ملفاً. السليم: ${result.healthy}، المفقود: ${result.totalMissing}.`
+    });
+  } catch (err) {
+    res.status(500).json({ error: { code: 'CHECK_INTEGRITY_ERROR', message: err.message } });
+  }
+});
+
+/**
+ * POST /api/database/detect-relocations
+ * Automatically detect relocated files across libraries (or within a specific library)
+ */
+router.post('/detect-relocations', async (req, res) => {
+  try {
+    const missing = req.body?.missing || null;
+    const libraryId = req.body?.libraryId ? Number(req.body.libraryId) : null;
+    const result = await detectRelocatedFiles(missing, { libraryId });
+    res.json({
+      data: result,
+      message: `تم اكتشاف ${result.relocations.length} ملف منقول يمكن إعادة ربطه تلقائياً.`
+    });
+  } catch (err) {
+    res.status(500).json({ error: { code: 'DETECT_RELOCATIONS_ERROR', message: err.message } });
+  }
+});
+
+/**
+ * POST /api/database/apply-relocations
+ * Apply detected path relocations preserving watch state and metadata
+ */
+router.post('/apply-relocations', (req, res) => {
+  try {
+    const relocations = req.body?.relocations || [];
+    const result = applyRelocations(relocations);
+    res.json({
+      data: result,
+      message: `تم بنجاح إعادة ربط ${result.applied} ملف منقول في قاعدة البيانات.`
+    });
+  } catch (err) {
+    res.status(500).json({ error: { code: 'APPLY_RELOCATIONS_ERROR', message: err.message } });
+  }
+});
+
+/**
+ * POST /api/database/prune-verified-missing
+ * Safely prune verified missing records and orphan associations
+ */
+router.post('/prune-verified-missing', (req, res) => {
+  try {
+    const missing = req.body?.missing || null;
+    const result = pruneVerifiedMissing(missing);
+    res.json({
+      data: result,
+      message: `تم حذف ${result.totalDeleted} سجل لملفات مفقودة وتنظيف السجلات اليتيمة التابعة لها.`
+    });
+  } catch (err) {
+    res.status(500).json({ error: { code: 'PRUNE_MISSING_ERROR', message: err.message } });
   }
 });
 

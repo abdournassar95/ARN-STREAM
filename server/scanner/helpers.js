@@ -273,7 +273,7 @@ async function probeWithLimit(filePath) {
 }
 
 async function processQueue() {
-  if (activeProbes >= 4 || queue.length === 0) return;
+  if (activeProbes >= 2 || queue.length === 0) return;
   const { filePath, resolve } = queue.shift();
   activeProbes++;
   try {
@@ -292,7 +292,7 @@ async function processQueue() {
         '-show_format',
         '-show_streams',
         filePath
-      ], { timeout: 2000, killSignal: 'SIGKILL' });
+      ], { timeout: 2000, killSignal: 'SIGKILL', windowsHide: true });
       isFfprobeAvailable = true;
       const data = JSON.parse(stdout);
       const videoStream = data.streams?.find(s => s.codec_type === 'video');

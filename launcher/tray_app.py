@@ -22,7 +22,7 @@ from PyQt6.QtCore import Qt, QUrl, QTimer, QSize
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 
 APP_NAME = "ARN Stream"
-APP_VERSION = "2.0.3"
+APP_VERSION = "3.0.1"
 SERVER_PORT = 8096
 SERVER_URL = f"http://localhost:{SERVER_PORT}"
 SERVER_SOCKET_KEY = "ARN_Stream_SingleInstance_Server"
@@ -229,15 +229,11 @@ class PersonalStreamTrayApp:
         self.setup_tray()
         self.start_server()
 
-        # If user opened the app normally (not during Windows boot autostart), launch browser!
+        # If user opened the app normally (not during Windows boot autostart), launch browser as soon as server is ready!
         if not self.autostart:
-            self.tray_icon.showMessage(
-                APP_NAME,
-                "مرحباً بك في ARN Stream 👋 تم تشغيل الخادم بنجاح وجاري فتح المنصة...",
-                QSystemTrayIcon.MessageIcon.Information,
-                3500
-            )
-            QTimer.singleShot(1500, self.open_browser)
+            self._browser_opened = False
+            self._poll_attempts = 0
+            self._check_and_open_browser()
         else:
             self.tray_icon.showMessage(
                 APP_NAME,
@@ -348,6 +344,22 @@ class PersonalStreamTrayApp:
         self.start_server()
         self.tray_icon.showMessage(APP_NAME, "تمت إعادة تشغيل السيرفر بنجاح.", QSystemTrayIcon.MessageIcon.Information, 2500)
 
+    def _check_and_open_browser(self):
+        if getattr(self, '_browser_opened', False):
+            return
+        self._poll_attempts = getattr(self, '_poll_attempts', 0) + 1
+        if self.is_server_alive() or self._poll_attempts >= 16:
+            self._browser_opened = True
+            self.tray_icon.showMessage(
+                APP_NAME,
+                "مرحباً بك في ARN Stream 👋 الخادم جاهز وجاري فتح المنصة...",
+                QSystemTrayIcon.MessageIcon.Information,
+                2500
+            )
+            self.open_browser()
+        else:
+            QTimer.singleShot(200, self._check_and_open_browser)
+
     def open_browser(self):
         webbrowser.open(SERVER_URL)
 
@@ -435,6 +447,10 @@ class PersonalStreamTrayApp:
         scan_action = QAction("🔍 فحص وتحديث المكتبة", self.menu)
         scan_action.triggered.connect(self.trigger_scan)
         self.menu.addAction(scan_action)
+
+        license_action = QAction("🛡️ تنشيط النسخة الكاملة (الترخيص)...", self.menu)
+        license_action.triggered.connect(self.open_browser)
+        self.menu.addAction(license_action)
 
         self.menu.addSeparator()
 

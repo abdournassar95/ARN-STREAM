@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="masrBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1c1102"/>
+      <stop offset="45%" stop-color="#362206"/>
+      <stop offset="80%" stop-color="#120b02"/>
+      <stop offset="100%" stop-color="#060300"/>
+    </linearGradient>
+    <radialGradient id="masrGlow" cx="50%" cy="30%" r="65%">
+      <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.45"/>
+      <stop offset="50%" stop-color="#d97706" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="goldChr" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#fef08a"/>
+      <stop offset="35%" stop-color="#fbbf24"/>
+      <stop offset="70%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+    <linearGradient id="nileBlue" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.7"/>
+    </filter>
+  </defs>
+
+  <!-- Background Base -->
+  <rect width="300" height="420" rx="20" fill="url(#masrBg)"/>
+  <rect width="300" height="420" rx="20" fill="url(#masrGlow)"/>
+
+  <!-- Golden Egyptian Wave / Lotus Arch Motif -->
+  <path d="M 0 130 Q 150 70 300 130" fill="none" stroke="#fbbf24" stroke-width="2" stroke-opacity="0.25"/>
+  <path d="M 0 145 Q 150 85 300 145" fill="none" stroke="#f59e0b" stroke-width="1.2" stroke-opacity="0.18"/>
+  <circle cx="150" cy="205" r="135" fill="none" stroke="#fbbf24" stroke-width="1.5" stroke-opacity="0.12" stroke-dasharray="10 8"/>
+
+  <!-- Top Badges -->
+  <g transform="translate(18, 22)">
+    <rect width="68" height="24" rx="12" fill="#ef4444" filter="url(#shadow)"/>
+    <circle cx="14" cy="12" r="4" fill="#ffffff"/>
+    <text x="36" y="16" fill="#ffffff" font-family="'Cairo', 'Inter', sans-serif" font-weight="900" font-size="11" letter-spacing="1">LIVE</text>
+  </g>
+
+  <g transform="translate(216, 22)">
+    <rect width="66" height="24" rx="6" fill="#000000" fill-opacity="0.65" stroke="#f59e0b" stroke-opacity="0.5" stroke-width="1"/>
+    <text x="33" y="16" fill="#fbbf24" font-family="'Inter', sans-serif" font-weight="900" font-size="11" text-anchor="middle">FHD 1080</text>
+  </g>
+
+  <!-- Center MBC Masr Branding -->
+  <g transform="translate(150, 205)" filter="url(#shadow)" text-anchor="middle">
+    <!-- Glowing background plate -->
+    <rect x="-115" y="-76" width="230" height="152" rx="20" fill="#130b02" fill-opacity="0.88" stroke="#f59e0b" stroke-opacity="0.4" stroke-width="1.5"/>
+
+    <!-- MBC Swan Curve Vector Motif -->
+    <g transform="translate(0, -44)">
+      <!-- Left Curve -->
+      <path d="M -35 15 C -45 -5 -15 -18 0 -5 C 15 -18 45 -5 35 15" fill="none" stroke="url(#goldChr)" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="0" cy="-6" r="3" fill="#fef08a"/>
+    </g>
+
+    <!-- MBC Typography -->
+    <text x="0" y="-4" fill="#ffffff" font-family="'Arial Black', 'Impact', sans-serif" font-weight="900" font-size="38" letter-spacing="3">
+      MBC
+    </text>
+
+    <!-- Masr Arabic Calligraphy Badge -->
+    <g transform="translate(0, 8)">
+      <rect x="-55" y="0" width="110" height="24" rx="12" fill="url(#goldChr)"/>
+      <text x="0" y="17" fill="#000000" font-family="'Cairo', sans-serif" font-weight="900" font-size="14" letter-spacing="1">
+        مصر 1 HD
+      </text>
+    </g>
+
+    <!-- Subtitle: Star Entertainment -->
+    <g transform="translate(0, 42)">
+      <rect x="-65" y="0" width="130" height="18" rx="9" fill="#000000" fill-opacity="0.6" stroke="#f59e0b" stroke-opacity="0.3" stroke-width="1"/>
+      <text x="0" y="13" fill="#fef08a" font-family="'Cairo', sans-serif" font-weight="800" font-size="10" letter-spacing="0.5">
+        البيت بيتك · كلام الناس
+      </text>
+    </g>
+  </g>
+
+  <!-- Bottom Details -->
+  <g transform="translate(20, 358)">
+    <text x="0" y="14" fill="#ffffff" font-family="'Cairo', sans-serif" font-weight="800" font-size="16">أقوى البرامج والمسلسلات</text>
+    <text x="0" y="32" fill="#fde68a" font-family="'Cairo', sans-serif" font-weight="600" font-size="12">دراما حصرية وتوك شو ترفيهي 24/7</text>
+  </g>
+
+  <!-- Subtle Border Rim -->
+  <rect width="298" height="418" x="1" y="1" rx="19" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-opacity="0.15"/>
+</svg>

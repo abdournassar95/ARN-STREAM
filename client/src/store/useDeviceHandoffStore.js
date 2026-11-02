@@ -127,6 +127,7 @@ export const useDeviceHandoffStore = create((set, get) => {
     incomingHandoff: null, // latest received handoff payload
     isModalOpen: false,
     isFullRemoteOpen: false,
+    isMirroringActive: true, // Whether route and browsing movements are mirrored live
     currentMediaToCast: null, // { type: 'movie'|'episode'|'track', id, title, poster, currentTime, duration, isPlaying }
 
     setRemotePlaybackState: (state) => set((s) => ({
@@ -139,6 +140,8 @@ export const useDeviceHandoffStore = create((set, get) => {
     openFullRemote: () => set({ isFullRemoteOpen: true }),
     closeFullRemote: () => set({ isFullRemoteOpen: false }),
     toggleFullRemote: () => set(s => ({ isFullRemoteOpen: !s.isFullRemoteOpen })),
+    toggleMirroring: () => set(s => ({ isMirroringActive: !s.isMirroringActive })),
+    setMirroringActive: (val) => set({ isMirroringActive: Boolean(val) }),
 
     // Initialize ultra-fast real-time WebSocket connection (< 5ms response time)
     initWebSocket: () => {
@@ -181,6 +184,22 @@ export const useDeviceHandoffStore = create((set, get) => {
               window.dispatchEvent(new CustomEvent('arn-scan-progress', { detail: data }));
             } else if (eventType === 'scan_completed') {
               window.dispatchEvent(new CustomEvent('arn-scan-completed', { detail: data }));
+            } else if (eventType === 'notification') {
+              window.dispatchEvent(new CustomEvent('arn-notification', { detail: data }));
+            } else if (eventType === 'notification_all_read') {
+              window.dispatchEvent(new CustomEvent('arn-notification-all-read', { detail: data }));
+            } else if (eventType === 'notification_cleared') {
+              window.dispatchEvent(new CustomEvent('arn-notification-cleared', { detail: data }));
+            } else if (eventType === 'notification_deleted') {
+              window.dispatchEvent(new CustomEvent('arn-notification-deleted', { detail: data }));
+            } else if (eventType === 'metadata_auto_fetch_progress') {
+              window.dispatchEvent(new CustomEvent('arn-metadata-fetch-progress', { detail: data }));
+            } else if (eventType === 'metadata_auto_fetch_completed') {
+              window.dispatchEvent(new CustomEvent('arn-metadata-fetch-completed', { detail: data }));
+            } else if (eventType === 'health_check_progress') {
+              window.dispatchEvent(new CustomEvent('arn-health-check-progress', { detail: data }));
+            } else if (eventType === 'health_check_completed') {
+              window.dispatchEvent(new CustomEvent('arn-health-check-completed', { detail: data }));
             }
           } catch (err) {
             console.warn('[Handoff-Store] WS parse error:', err.message);
@@ -372,7 +391,7 @@ export const useDeviceHandoffStore = create((set, get) => {
       }
     },
 
-    // Connect to a device directly in remote control mode
+    // Connect to a device directly in remote control / live mirroring mode
     connectToDevice: (targetDevice) => {
       const session = {
         targetDeviceId: targetDevice.id,
@@ -385,12 +404,26 @@ export const useDeviceHandoffStore = create((set, get) => {
         localStorage.setItem('arn_ps_active_remote_session', JSON.stringify(session));
       } catch (e) {}
 
+      // Close all modals so the main application UI appears immediately
       set({
         activeRemoteSession: session,
         remotePlaybackState: targetDevice.currentPlaybackState || null,
-        isFullRemoteOpen: true
+        isFullRemoteOpen: false,
+        isModalOpen: false,
+        isMirroringActive: true
       });
       get().fetchTargetState(targetDevice.id);
+
+      // Immediately sync current route to the target device
+      if (typeof window !== 'undefined') {
+        const currentPath = window.location.pathname + window.location.search + window.location.hash;
+        get().sendRemoteCommand('navigate', { path: currentPath, fromMirror: true });
+        
+        // Broadcast custom notification
+        window.dispatchEvent(new CustomEvent('arn-mirroring-started', {
+          detail: { targetDeviceName: targetDevice.name }
+        }));
+      }
     },
 
     // Fetch live playback state from server for a specific device
@@ -510,7 +543,7 @@ export const useDeviceHandoffStore = create((set, get) => {
       try {
         localStorage.removeItem('arn_ps_active_remote_session');
       } catch (e) {}
-      set({ activeRemoteSession: null, isFullRemoteOpen: false });
+      set({ activeRemoteSession: null, isFullRemoteOpen: false, isMirroringActive: false });
     }
   };
 });

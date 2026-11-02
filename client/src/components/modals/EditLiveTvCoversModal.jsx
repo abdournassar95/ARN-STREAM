@@ -5,15 +5,31 @@ import { useTranslation } from 'react-i18next';
 import { useSettingsStore } from '../../store/useSettingsStore';
 
 export const PRESET_CHANNELS = [
-  { id: 'bein_sports', name: 'beIN SPORTS 1', category: 'sports', url: '/channels/bein_sports.svg' },
+  // القنوات الرياضية الرائدة
+  { id: 'bein_sports', name: 'beIN SPORTS 1 Premium', category: 'sports', url: '/channels/bein_sports.svg' },
+  { id: 'ontime_sports', name: 'ON Time Sports 1 HD (مصر)', category: 'sports', url: '/channels/ontime_sports.svg' },
   { id: 'ssc_sports', name: 'SSC SPORTS 1 HD', category: 'sports', url: '/channels/ssc_sports.svg' },
-  { id: 'mbc_hd', name: 'MBC 1 HD', category: 'general', url: '/channels/mbc_hd.svg' },
+  { id: 'ad_sports', name: 'AD SPORTS 1 HD (أبوظبي)', category: 'sports', url: '/channels/ad_sports.svg' },
+  { id: 'alkass', name: 'Alkass Sports HD (الكاس)', category: 'sports', url: '/channels/alkass.svg' },
+
+  // القنوات المصرية والأندية
+  { id: 'alahly_tv', name: 'قناة الأهلي — Al Ahly TV', category: 'egyptian', url: '/channels/alahly_tv.svg' },
+  { id: 'zamalek_tv', name: 'قناة الزمالك — Zamalek TV', category: 'egyptian', url: '/channels/zamalek_tv.svg' },
+  { id: 'mbc_masr', name: 'إم بي سي مصر — MBC Masr 1', category: 'egyptian', url: '/channels/mbc_masr.svg' },
+  { id: 'dmc_hd', name: 'دي إم سي — dmc Drama HD', category: 'egyptian', url: '/channels/dmc_hd.svg' },
+  { id: 'alhayah_hd', name: 'شبكة الحياة — Al Hayah HD', category: 'egyptian', url: '/channels/alhayah_hd.svg' },
+  { id: 'mbc_hd', name: 'MBC 1 HD العامة', category: 'general', url: '/channels/mbc_hd.svg' },
   { id: 'osn_tv', name: 'OSN tv Movies', category: 'cinema', url: '/channels/osn_tv.svg' },
-  { id: 'natgeo', name: 'National Geographic', category: 'docs', url: '/channels/natgeo.svg' },
-  { id: 'alkass', name: 'Alkass Sports', category: 'sports', url: '/channels/alkass.svg' },
+  { id: 'natgeo', name: 'National Geographic وثائقي', category: 'docs', url: '/channels/natgeo.svg' },
 ];
 
-export const DEFAULT_LIVE_TV_COVERS = PRESET_CHANNELS.slice(0, 5).map(c => c.url);
+export const DEFAULT_LIVE_TV_COVERS = [
+  '/channels/bein_sports.svg',
+  '/channels/ontime_sports.svg',
+  '/channels/mbc_masr.svg',
+  '/channels/alahly_tv.svg',
+  '/channels/ssc_sports.svg',
+];
 
 export default function EditLiveTvCoversModal({ isOpen, onClose }) {
   const { t, i18n } = useTranslation();
@@ -88,19 +104,19 @@ export default function EditLiveTvCoversModal({ isOpen, onClose }) {
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
       <div 
-        className="relative w-full max-w-2xl max-h-[90vh] flex flex-col bg-[#0c1017] border border-red-500/30 rounded-2xl sm:rounded-3xl shadow-[0_0_50px_rgba(239,68,68,0.25)] overflow-hidden"
+        className="relative w-full max-w-2xl max-h-[90vh] flex flex-col bg-[#0c1017] border border-violet-500/35 rounded-2xl sm:rounded-3xl shadow-[0_0_50px_rgba(124,58,237,0.25)] overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 bg-gradient-to-r from-red-950/40 via-surface to-surface">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 bg-gradient-to-r from-violet-950/40 via-surface to-surface">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-red-600/20 border border-red-500/30 flex items-center justify-center text-red-400 shadow-md">
+            <div className="w-10 h-10 rounded-xl bg-violet-600/20 border border-violet-500/35 flex items-center justify-center text-violet-400 shadow-md">
               <Tv size={20} />
             </div>
             <div>
               <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
                 <span>{isArabic ? 'تخصيص صور قنوات البث المباشر' : 'Customize Live TV Channels Posters'}</span>
-                <Sparkles size={16} className="text-red-400" />
+                <Sparkles size={16} className="text-violet-400" />
               </h2>
               <p className="text-xs text-muted">
                 {isArabic ? 'اختر حتى 5 قنوات لتظهر بشكل ثلاثي الأبعاد على بطاقة البث' : 'Choose up to 5 channels to display in 3D on the card'}
@@ -134,7 +150,7 @@ export default function EditLiveTvCoversModal({ isOpen, onClose }) {
                   key={idx}
                   className={`w-9 h-12 rounded-lg border flex items-center justify-center overflow-hidden transition-all ${
                     url 
-                      ? 'border-red-500 bg-red-950/30 shadow-md ring-1 ring-red-500/30' 
+                      ? 'border-violet-500 bg-violet-950/30 shadow-md ring-1 ring-violet-500/35' 
                       : 'border-dashed border-white/20 bg-white/5'
                   }`}
                 >
@@ -166,7 +182,7 @@ export default function EditLiveTvCoversModal({ isOpen, onClose }) {
                     onClick={() => handleToggleCover(item.url)}
                     className={`group relative rounded-xl overflow-hidden border p-2 flex flex-col items-center gap-2 transition-all ${
                       isSelected
-                        ? 'border-red-500 bg-red-950/25 ring-2 ring-red-500/30 shadow-lg shadow-red-500/10'
+                        ? 'border-violet-500 bg-violet-950/25 ring-2 ring-violet-500/35 shadow-lg shadow-violet-500/10'
                         : 'border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20'
                     }`}
                   >
@@ -177,7 +193,7 @@ export default function EditLiveTvCoversModal({ isOpen, onClose }) {
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" 
                       />
                       {isSelected && (
-                        <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-red-600 text-white flex items-center justify-center shadow-lg">
+                        <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-[#7c3aed] text-white flex items-center justify-center shadow-lg">
                           <Check size={14} strokeWidth={3} />
                         </div>
                       )}
@@ -203,12 +219,12 @@ export default function EditLiveTvCoversModal({ isOpen, onClose }) {
                 value={customUrlInput}
                 onChange={e => setCustomUrlInput(e.target.value)}
                 placeholder={isArabic ? 'ضع رابط صورة القناة (https://...)' : 'Enter image URL (https://...)'}
-                className="flex-1 px-3 py-1.5 rounded-xl bg-black/40 border border-white/15 text-xs text-white placeholder-muted focus:outline-none focus:border-red-500"
+                className="flex-1 px-3 py-1.5 rounded-xl bg-black/40 border border-white/15 text-xs text-white placeholder-muted focus:outline-none focus:border-violet-500"
               />
               <button
                 type="submit"
                 disabled={!customUrlInput.trim()}
-                className="px-3.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-30 text-white text-xs font-bold flex items-center gap-1 transition"
+                className="px-3.5 py-1.5 rounded-xl bg-[#7c3aed] hover:bg-[#8b5cf6] disabled:opacity-30 text-white text-xs font-bold flex items-center gap-1 transition"
               >
                 <Plus size={14} />
                 <span>{isArabic ? 'إضافة' : 'Add'}</span>
@@ -257,7 +273,7 @@ export default function EditLiveTvCoversModal({ isOpen, onClose }) {
             <button
               type="button"
               onClick={handleSave}
-              className="px-5 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold shadow-lg shadow-red-600/30 transition flex items-center gap-1.5"
+              className="px-5 py-1.5 rounded-xl bg-[#7c3aed] hover:bg-[#8b5cf6] text-white text-xs font-bold shadow-lg shadow-violet-600/30 transition flex items-center gap-1.5"
             >
               <Check size={14} />
               <span>{isArabic ? 'حفظ التغييرات' : 'Save Changes'}</span>

@@ -2,9 +2,35 @@ import express from 'express';
 import fs from 'fs';
 import db, { getAllLibraries } from '../db.js';
 import { requireAuth } from '../services/auth.js';
-import { getContinueWatching } from '../services/playback-manager.js';
+import { getContinueWatching, getContinueListening } from '../services/playback-manager.js';
 
 const router = express.Router();
+
+// ─── ذاكرة تخزين مؤقت سريعة لفحص وجود الملفات (تمنع حظر Event Loop عبر fs.existsSync المتكرر) ───
+const pathExistsCache = new Map();
+const PATH_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+function pathExistsFast(filePath) {
+  if (!filePath) return false;
+  const now = Date.now();
+  const cached = pathExistsCache.get(filePath);
+  if (cached && now - cached.ts < PATH_CACHE_TTL) {
+    return cached.exists;
+  }
+  let exists = false;
+  try {
+    exists = fs.existsSync(filePath);
+  } catch {
+    exists = false;
+  }
+  if (pathExistsCache.size > 5000) pathExistsCache.clear();
+  pathExistsCache.set(filePath, { exists, ts: now });
+  return exists;
+}
+
+// استعلامات مسبقة التحضير (Prepared Statements) لتسريع جلب الصور
+const stmtPrimaryAlbumCover = db.prepare(`SELECT id FROM images WHERE media_type = 'album' AND media_id = ? AND (image_type = 'album_cover' OR image_type = 'poster') ORDER BY is_primary DESC, id DESC LIMIT 1`);
+const stmtPrimaryMediaPoster = db.prepare(`SELECT id FROM images WHERE media_type = ? AND media_id = ? AND image_type = 'poster' ORDER BY is_primary DESC, id DESC LIMIT 1`);
 
 // Require authentication for all library views
 router.use(requireAuth);
@@ -33,13 +59,7 @@ router.get('/landing', (req, res) => {
     LIMIT 30
   `).all();
 
-  const validMovies = candidateMovies.filter(m => {
-    try {
-      return m.path && fs.existsSync(m.path);
-    } catch {
-      return false;
-    }
-  });
+  const validMovies = candidateMovies.filter(m => pathExistsFast(m.path));
 
   const candidateSeries = db.prepare(`
     SELECT series.id, series.title, series.year, series.added_at, 'series' as media_type
@@ -62,24 +82,19 @@ router.get('/landing', (req, res) => {
         WHERE seasons.series_id = ? 
         LIMIT 6
       `).all(s.id);
-      return episodes.some(ep => ep.path && fs.existsSync(ep.path));
+      return episodes.some(ep => pathExistsFast(ep.path));
     } catch {
       return false;
     }
   });
   
   const withImage = (item) => {
-    let img;
     if (item.media_type === 'album') {
-      img = db.prepare(`SELECT id FROM images WHERE media_type = 'album' AND media_id = ? AND image_type = 'album_cover' AND is_primary = 1 LIMIT 1`).get(item.id)
-        || db.prepare(`SELECT id FROM images WHERE media_type = 'album' AND media_id = ? AND (image_type = 'album_cover' OR image_type = 'poster') LIMIT 1`).get(item.id);
+      const img = stmtPrimaryAlbumCover.get(item.id);
       const url = img ? `/api/image/${img.id}/thumb` : null;
       return { ...item, poster: url, cover: url };
     }
-    img = db.prepare(`SELECT id FROM images WHERE media_type = ? AND media_id = ? AND image_type = 'poster' AND is_primary = 1 LIMIT 1`).get(item.media_type, item.id);
-    if (!img) {
-      img = db.prepare(`SELECT id FROM images WHERE media_type = ? AND media_id = ? AND image_type = 'poster' LIMIT 1`).get(item.media_type, item.id);
-    }
+    const img = stmtPrimaryMediaPoster.get(item.media_type, item.id);
     const posterUrl = img ? `/api/image/${img.id}/thumb` : null;
     return { ...item, poster: posterUrl, cover: posterUrl };
   };
@@ -107,29 +122,7 @@ router.get('/landing', (req, res) => {
 
 
   const userId = req.user ? req.user.id : 1;
-  const continueListeningAll = db.prepare(`
-    SELECT tracks.id as trackId, albums.id as albumId, artists.id as artistId,
-           tracks.title, albums.title as albumTitle, artists.name as artistName,
-           playback_state.position, playback_state.duration, playback_state.updated_at
-    FROM playback_state
-    JOIN tracks ON playback_state.media_id = tracks.id
-    JOIN albums ON tracks.album_id = albums.id
-    JOIN artists ON albums.artist_id = artists.id
-    WHERE playback_state.user_id = ? 
-      AND (playback_state.media_type = 'track' OR playback_state.media_type = 'audio')
-      AND playback_state.position > 0
-    ORDER BY playback_state.updated_at DESC LIMIT 15
-  `).all(userId).map(c => {
-    const img = db.prepare(`SELECT id FROM images WHERE media_type = 'album' AND media_id = ? AND image_type = 'album_cover' AND is_primary = 1 LIMIT 1`).get(c.albumId);
-    return {
-      ...c,
-      media_type: 'audio',
-      type: 'audio',
-      id: c.trackId,
-      poster: img ? `/api/image/${img.id}/thumb` : null,
-      progress: c.duration ? (c.position / c.duration) * 100 : 0
-    };
-  });
+  const continueListeningAll = getContinueListening(userId, { limit: 8 });
 
   const latestAudio = db.prepare(`
     SELECT albums.*, artists.name as artistName FROM albums
@@ -146,14 +139,14 @@ router.get('/landing', (req, res) => {
   });
 
 
-  const continueWatching = getContinueWatching(userId, { limit: 15 });
+  const continueWatching = getContinueWatching(userId, { limit: 8 });
 
   const latestByLibrary = {};
   for (const lib of libraries) {
     let items = [];
     if (lib.type === 'movies') {
       const c = db.prepare(`SELECT id, title, year, added_at, path, 'movie' as media_type FROM movies WHERE library_id = ? AND path IS NOT NULL ORDER BY added_at DESC LIMIT 30`).all(lib.id);
-      items = c.filter(m => { try { return fs.existsSync(m.path); } catch { return false; } }).slice(0, 15);
+      items = c.filter(m => pathExistsFast(m.path)).slice(0, 15);
     } else if (lib.type === 'shows') {
       const c = db.prepare(`
         SELECT series.id, series.title, series.year, series.added_at, 'series' as media_type
@@ -166,7 +159,7 @@ router.get('/landing', (req, res) => {
       items = c.filter(s => {
         try {
           const ep = db.prepare(`SELECT episodes.path FROM episodes JOIN seasons ON seasons.id = episodes.season_id WHERE seasons.series_id = ? LIMIT 1`).get(s.id);
-          return ep && ep.path && fs.existsSync(ep.path);
+          return ep && pathExistsFast(ep.path);
         } catch { return false; }
       }).slice(0, 15);
     } else if (lib.type === 'music') {
@@ -204,16 +197,14 @@ router.get('/movies-home', (req, res) => {
 
   const userId = req.user ? req.user.id : 1;
 
-  const continueWatchingAll = getContinueWatching(userId, { limit: 15 });
+  const continueWatchingAll = getContinueWatching(userId, { limit: 8 });
 
   const candidateMovies = libId ? db.prepare(`
     SELECT *, 'movie' as media_type FROM movies 
     WHERE library_id = ?
       AND path IS NOT NULL
     ORDER BY added_at DESC LIMIT 30
-  `).all(libId).filter(m => {
-    try { return m.path && fs.existsSync(m.path); } catch { return false; }
-  }) : [];
+  `).all(libId).filter(m => pathExistsFast(m.path)) : [];
 
   const candidateSeries = db.prepare(`
     SELECT series.*, 'series' as media_type, COUNT(episodes.id) as episode_count
@@ -247,9 +238,7 @@ router.get('/movies-home', (req, res) => {
     WHERE library_id = ?
       AND path IS NOT NULL
     ORDER BY year DESC LIMIT 30
-  `).all(libId).filter(m => {
-    try { return m.path && fs.existsSync(m.path); } catch { return false; }
-  }).slice(0, 12) : [];
+  `).all(libId).filter(m => pathExistsFast(m.path)).slice(0, 12) : [];
 
   const series = db.prepare(`
     SELECT series.*, COUNT(episodes.id) as episode_count
@@ -273,8 +262,6 @@ router.get('/movies-home', (req, res) => {
   res.json({
     data: {
       continueWatching: continueWatchingWithImages,
-      continueListening: continueListeningAll,
-      latestAudio: latestAudio,
       recentlyAdded: combinedRecent,
       collections,
       movies: withImages(movies, 'movie', 'poster'),
@@ -334,8 +321,11 @@ router.get('/music-home', (req, res) => {
     ORDER BY tracks.last_played_at DESC LIMIT 10
   `).all(libId) : [];
 
+  const userId = req.user ? req.user.id : 1;
+  const continueListening = getContinueListening(userId, { limit: 8 });
+
   res.json({
-    data: { artists, albums: recentAlbums, playlists, recentlyPlayed }
+    data: { artists, albums: recentAlbums, playlists, recentlyPlayed, continueListening }
   });
 });
 

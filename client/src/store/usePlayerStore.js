@@ -22,11 +22,15 @@ export const usePlayerStore = create(
 
       playTrack: (track, queue = null) => {
         if (!track) return;
+        // Audio tracks and Quran recitations always start strictly from the beginning (0:00) per requirement
+        const cleanTrack = { ...track, resumePosition: 0, _resumeStamp: Date.now() };
+
         if (queue && queue.length > 0) {
           const idx = queue.findIndex(t => t.id === track.id);
+          const updatedQueue = queue.map((t, i) => (i === (idx >= 0 ? idx : 0) ? cleanTrack : { ...t, resumePosition: 0 }));
           set({
-            currentTrack: track,
-            musicQueue: queue,
+            currentTrack: cleanTrack,
+            musicQueue: updatedQueue,
             currentIndex: idx >= 0 ? idx : 0,
             isPlaying: true
           });
@@ -35,11 +39,12 @@ export const usePlayerStore = create(
           const { musicQueue } = get();
           const existingIdx = musicQueue.findIndex(t => t.id === track.id);
           if (existingIdx >= 0) {
-            set({ currentTrack: track, currentIndex: existingIdx, isPlaying: true });
+            const updatedQueue = musicQueue.map((t, i) => (i === existingIdx ? cleanTrack : { ...t, resumePosition: 0 }));
+            set({ currentTrack: cleanTrack, musicQueue: updatedQueue, currentIndex: existingIdx, isPlaying: true });
           } else {
             set({
-              currentTrack: track,
-              musicQueue: [...musicQueue, track],
+              currentTrack: cleanTrack,
+              musicQueue: [...musicQueue.map(t => ({ ...t, resumePosition: 0 })), cleanTrack],
               currentIndex: musicQueue.length,
               isPlaying: true
             });
@@ -53,10 +58,11 @@ export const usePlayerStore = create(
           set({ musicQueue: [], currentIndex: -1, currentTrack: null, isPlaying: false });
           return;
         }
+        const cleanQueue = queue.map(t => ({ ...t, resumePosition: 0 }));
         set({
-          musicQueue: queue,
+          musicQueue: cleanQueue,
           currentIndex: startIndex,
-          currentTrack: queue[startIndex] || null,
+          currentTrack: cleanQueue[startIndex] ? { ...cleanQueue[startIndex], resumePosition: 0 } : null,
           isPlaying: true
         });
       },
@@ -126,14 +132,14 @@ export const usePlayerStore = create(
         if (!musicQueue || !musicQueue.length) return;
         if (shuffle) {
           if (musicQueue.length <= 1) {
-            set({ currentIndex: 0, currentTrack: musicQueue[0], isPlaying: true });
+            set({ currentIndex: 0, currentTrack: musicQueue[0] ? { ...musicQueue[0], resumePosition: 0 } : null, isPlaying: true });
             return;
           }
           let rand = currentIndex;
           while (rand === currentIndex) {
             rand = Math.floor(Math.random() * musicQueue.length);
           }
-          set({ currentIndex: rand, currentTrack: musicQueue[rand], isPlaying: true });
+          set({ currentIndex: rand, currentTrack: musicQueue[rand] ? { ...musicQueue[rand], resumePosition: 0 } : null, isPlaying: true });
           return;
         }
         let next = currentIndex + 1;
@@ -145,7 +151,7 @@ export const usePlayerStore = create(
             return;
           }
         }
-        set({ currentIndex: next, currentTrack: musicQueue[next], isPlaying: true });
+        set({ currentIndex: next, currentTrack: musicQueue[next] ? { ...musicQueue[next], resumePosition: 0 } : null, isPlaying: true });
       },
 
       prevTrack: () => {
@@ -159,7 +165,7 @@ export const usePlayerStore = create(
             prev = 0;
           }
         }
-        set({ currentIndex: prev, currentTrack: musicQueue[prev], isPlaying: true });
+        set({ currentIndex: prev, currentTrack: musicQueue[prev] ? { ...musicQueue[prev], resumePosition: 0 } : null, isPlaying: true });
       },
 
       togglePlay: () => set(s => ({ isPlaying: !s.isPlaying })),
@@ -280,6 +286,7 @@ export const usePlayerStore = create(
       clearVideo: () => set({ currentVideo: null, videoQueue: [], videoQueueIndex: -1 }),
       clearVideoQueue: () => set({ videoQueue: [], videoQueueIndex: -1 }),
       stopMusicForVideo: () => set({ isPlaying: false, currentTrack: null }),
+      stopMusic: () => set({ isPlaying: false, currentTrack: null }),
     }),
     {
       name: 'personalstream-player-prefs', // localStorage key

@@ -200,6 +200,14 @@ export default function MiniPlayer() {
   const [showEqualizer, setShowEqualizer] = useState(false);
   const [isFav, setIsFav] = useState(false);
   const [trackRating, setTrackRating] = useState(0);
+  // Always reset audio playback position strictly to 0 on every track change
+  useEffect(() => {
+    setCurrentTime(0);
+    if (audioRef.current) {
+      audioRef.current.currentTime = 0;
+    }
+  }, [currentTrack?.id]);
+
   const queueRef = useRef(null);
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -407,6 +415,38 @@ export default function MiniPlayer() {
     }
   }, [currentTrack]);
 
+  // Handle complete termination when currentTrack is cleared (e.g. switching to Live TV or Video Player)
+  useEffect(() => {
+    if (!currentTrack) {
+      if (audioRef.current) {
+        try {
+          audioRef.current.pause();
+          audioRef.current.removeAttribute('src');
+          audioRef.current.load();
+        } catch (e) {}
+      }
+      setExpanded(false);
+      if ('mediaSession' in navigator) {
+        try {
+          navigator.mediaSession.playbackState = 'none';
+        } catch (e) {}
+      }
+    }
+  }, [currentTrack]);
+
+  // Clean up on component unmount
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        try {
+          audioRef.current.pause();
+          audioRef.current.removeAttribute('src');
+          audioRef.current.load();
+        } catch (e) {}
+      }
+    };
+  }, []);
+
   // Resume Web Audio Context on play
   useEffect(() => {
     if (isPlaying) {
@@ -486,6 +526,17 @@ export default function MiniPlayer() {
 
   // Handle track ending and auto-advancing seamlessly
   const handleEnded = useCallback(() => {
+    if (currentTrack?.id) {
+      const endDur = Math.round(audioRef.current?.duration || currentTrack.duration || duration || 0);
+      if (endDur > 0) {
+        savePlayback({ media_type: 'track', media_id: currentTrack.id, position: endDur, duration: endDur })
+          .then(() => {
+            qc.invalidateQueries({ queryKey: ['landing'] });
+            qc.invalidateQueries({ queryKey: ['music-home'] });
+          })
+          .catch(() => {});
+      }
+    }
     const { repeat, musicQueue, nextTrack } = usePlayerStore.getState();
     if (repeat === 'one') {
       if (audioRef.current) {
@@ -502,7 +553,7 @@ export default function MiniPlayer() {
         nextTrack();
       }
     }
-  }, [crossfade, crossfadeDuration]);
+  }, [crossfade, crossfadeDuration, currentTrack, duration, qc]);
 
   // Sync play/pause state with audio element
   useEffect(() => {
@@ -533,10 +584,18 @@ export default function MiniPlayer() {
   };
 
   const handleLoadedMetadata = (e) => {
-    const dur = e.currentTarget.duration || currentTrack?.duration || 0;
+    const audioEl = e.currentTarget;
+    const dur = audioEl.duration || currentTrack?.duration || 0;
     setDuration(dur);
-    e.currentTarget.volume = volume;
-    equalizerEngine.attach(e.currentTarget, {
+    audioEl.volume = volume;
+
+    // تشغيل المقاطع الصوتية والتلاوات دائماً من البداية (00:00) بناءً على طلب المستخدم
+    try {
+      audioEl.currentTime = 0;
+      setCurrentTime(0);
+    } catch {}
+
+    equalizerEngine.attach(audioEl, {
       bands: eqBands,
       preamp: eqPreamp,
       enabled: eqEnabled,
@@ -588,16 +647,33 @@ export default function MiniPlayer() {
     return () => { document.body.style.overflow = ''; };
   }, [expanded]);
 
-  // Save playback position every 5s
+  // Save playback position every 5s and on pause/unmount
+  const saveAudioProgress = useCallback(() => {
+    const aud = audioRef.current;
+    if (!currentTrack?.id || !aud) return;
+    const pos = Math.round(aud.currentTime || 0);
+    const dur = Math.round(aud.duration || currentTrack.duration || 0);
+    if (pos < 3) return;
+    savePlayback({ media_type: 'track', media_id: currentTrack.id, position: pos, duration: dur })
+      .then(() => {
+        qc.invalidateQueries({ queryKey: ['landing'] });
+        qc.invalidateQueries({ queryKey: ['music-home'] });
+      })
+      .catch(() => {});
+  }, [currentTrack, qc]);
+
   useEffect(() => {
     if (!currentTrack) return;
     const id = setInterval(() => {
       if (audioRef.current && !audioRef.current.paused) {
-        savePlayback({ media_type: 'track', media_id: currentTrack.id, position: Math.round(audioRef.current.currentTime), duration: Math.round(audioRef.current.duration || currentTrack.duration || 0) }).catch(() => {});
+        saveAudioProgress();
       }
     }, 5000);
-    return () => clearInterval(id);
-  }, [currentTrack]);
+    return () => {
+      clearInterval(id);
+      saveAudioProgress();
+    };
+  }, [currentTrack, saveAudioProgress]);
 
   const handleSeek = (e) => {
     const val = Number(e.target.value);
@@ -793,11 +869,11 @@ export default function MiniPlayer() {
                       <button onClick={nextTrack} className="w-11 h-11 rounded-full hover:bg-tx/10 flex items-center justify-center"><SkipForward size={22} /></button>
                       <button onClick={toggleRepeat} className={`w-10 h-10 rounded-full hover:bg-tx/10 flex items-center justify-center transition ${repeatColor}`} title={repeatTitle}>{repeatIcon}</button>
                     </div>
-                    <div className="flex items-center gap-2 mt-4 w-full max-w-[220px]">
+                    <div className="flex items-center gap-2 mt-4 w-full max-w-[220px]" dir="ltr">
                       <button onClick={() => handleVolumeChange(volume > 0 ? 0 : (globalVolume || 0.8))} className="text-muted hover:text-text transition">
                         {volume === 0 ? <VolumeX size={15} /> : <Volume2 size={15} />}
                       </button>
-                      <input type="range" min={0} max={1} step={0.05} value={volume} onChange={e => handleVolumeChange(Number(e.target.value))} className="flex-1 accent-primaryMusic" />
+                      <input type="range" dir="ltr" min={0} max={1} step={0.05} value={volume} onChange={e => handleVolumeChange(Number(e.target.value))} className="flex-1 accent-primaryMusic" />
                       <span className="text-[10px] text-muted w-6 text-end">{Math.round(volume * 100)}%</span>
                     </div>
                   </>
@@ -859,11 +935,11 @@ export default function MiniPlayer() {
                 <button onClick={nextTrack} aria-label="Next track" className="w-11 h-11 rounded-full hover:bg-tx/10 flex items-center justify-center"><SkipForward size={22} /></button>
                 <button onClick={toggleRepeat} aria-label={repeatTitle} className={`w-10 h-10 rounded-full hover:bg-tx/10 flex items-center justify-center transition ${repeatColor}`} title={repeatTitle}>{repeatIcon}</button>
               </div>
-              <div className="flex items-center gap-2 mt-4 w-full max-w-[220px]">
+              <div className="flex items-center gap-2 mt-4 w-full max-w-[220px]" dir="ltr">
                 <button onClick={() => handleVolumeChange(volume > 0 ? 0 : (globalVolume || 0.8))} aria-label="Volume mute toggle" className="text-muted hover:text-text transition">
                   {volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
                 </button>
-                <input type="range" min={0} max={1} step={0.05} value={volume} onChange={e => handleVolumeChange(Number(e.target.value))} className="flex-1 accent-primaryMusic" />
+                <input type="range" dir="ltr" min={0} max={1} step={0.05} value={volume} onChange={e => handleVolumeChange(Number(e.target.value))} className="flex-1 accent-primaryMusic" />
                 <span className="text-[10px] text-muted w-6 text-end">{Math.round(volume * 100)}%</span>
               </div>
             </div>
@@ -1005,12 +1081,12 @@ export default function MiniPlayer() {
             <span className="text-xs text-muted tabular-nums whitespace-nowrap flex-shrink-0">
               {fmt(currentTime)} / {duration ? fmt(duration) : '--:--'}
             </span>
-            <input type="range" min={0} max={100} value={progress} onChange={handleSeek} className="flex-1 accent-primaryMusic min-w-[80px]" />
-            <div className="flex items-center gap-2 ms-4">
+            <input type="range" dir="ltr" min={0} max={100} value={progress} onChange={handleSeek} className="flex-1 accent-primaryMusic min-w-[80px]" />
+            <div className="flex items-center gap-2 ms-4" dir="ltr">
               <button onClick={() => handleVolumeChange(volume > 0 ? 0 : (globalVolume || 0.8))} className="text-muted hover:text-text transition">
                 {volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
               </button>
-              <input type="range" min={0} max={1} step={0.05} value={volume} onChange={e => handleVolumeChange(Number(e.target.value))} className="w-20 accent-primaryMusic" />
+              <input type="range" dir="ltr" min={0} max={1} step={0.05} value={volume} onChange={e => handleVolumeChange(Number(e.target.value))} className="w-20 accent-primaryMusic" />
               <span className="text-[10px] text-muted w-6 text-end">{Math.round(volume * 100)}%</span>
             </div>
           </div>

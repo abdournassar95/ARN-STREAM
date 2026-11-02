@@ -81,7 +81,7 @@ router.post('/:type/:id/download', async (req, res) => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'ARNStream v2.0.3'
+        'User-Agent': 'ARNStream v3.0.1'
       },
       body: JSON.stringify({ file_id })
     });
@@ -223,6 +223,47 @@ router.get('/serve', async (req, res) => {
   }
 
   const resolved = path.resolve(subPath);
+
+  // Security Hardening: Path Traversal Protection
+  // Ensure the resolved subtitle path strictly resides within registered library directories or the application data directory
+  const allowedRoots = [path.resolve(getDataDir())];
+  try {
+    const libRows = db.prepare('SELECT paths FROM libraries').all();
+    for (const row of libRows) {
+      const rawPaths = row.paths || row.path;
+      if (!rawPaths) continue;
+      try {
+        const parsed = typeof rawPaths === 'string' ? JSON.parse(rawPaths) : rawPaths;
+        if (Array.isArray(parsed)) {
+          for (const p of parsed) {
+            if (p && typeof p === 'string') allowedRoots.push(path.resolve(p));
+          }
+        } else if (typeof parsed === 'string' && parsed) {
+          allowedRoots.push(path.resolve(parsed));
+        }
+      } catch {
+        if (typeof rawPaths === 'string') allowedRoots.push(path.resolve(rawPaths));
+      }
+    }
+  } catch (err) {
+    console.error('[Subtitles Security] Error querying library paths:', err.message);
+  }
+
+  const isAllowed = allowedRoots.some(root => {
+    const normRoot = root.toLowerCase();
+    const normTarget = resolved.toLowerCase();
+    const rel = path.relative(normRoot, normTarget);
+    return !rel.startsWith('..') && !path.isAbsolute(rel);
+  });
+
+  if (!isAllowed) {
+    return res.status(403).json({
+      error: {
+        code: 'FORBIDDEN',
+        message: 'مسار ملف الترجمة يقع خارج مجلدات المكتبات المسجلة أو مجلد البيانات (Path Traversal Forbidden)'
+      }
+    });
+  }
 
   // Validate file existence and ensure it is not a directory
   try {

@@ -179,7 +179,7 @@ export default function SeriesDetails() {
     setVideoQueue(list, 0);
     setIsEpisodeSelectMode(false);
     setSelectedEpisodeIds([]);
-    navigate(`/watch/episode/${list[0].id}`);
+    navigate(`/watch/episode/${list[0].id}?autoPlay=true&startFromBeginning=true`);
   };
 
   const handleDownloadSingleEpisode = (e, epId) => {
@@ -243,7 +243,38 @@ export default function SeriesDetails() {
       queue.sort(() => Math.random() - 0.5);
     }
     setVideoQueue(queue, 0);
-    navigate(`/watch/episode/${queue[0].id}`);
+    navigate(`/watch/episode/${queue[0].id}?autoPlay=true&startFromBeginning=true`);
+  };
+  const handlePlayWholeSeries = (shuffle = false) => {
+    if (!s?.seasons?.length) return;
+    let allEpisodesQueue = [];
+    const sortedSeasons = [...s.seasons].sort((a, b) => (a.season_number || 1) - (b.season_number || 1));
+    for (const sn of sortedSeasons) {
+      if (!sn.episodes?.length) continue;
+      const snPoster = sn.posters?.[0]?.thumb || sn.posters?.[0]?.url || poster;
+      const sortedEps = [...sn.episodes].sort((a, b) => (a.episode_number || 1) - (b.episode_number || 1));
+      for (const ep of sortedEps) {
+        allEpisodesQueue.push({
+          id: ep.id,
+          title: ep.title || (isArabic ? `الحلقة ${ep.episode_number}` : `Episode ${ep.episode_number}`),
+          episode_number: ep.episode_number,
+          season_number: sn.season_number,
+          season_id: sn.id,
+          series_id: id,
+          series_title: s?.title,
+          type: 'episode',
+          media_type: 'episode',
+          poster: snPoster || null,
+          duration: ep.duration || null,
+        });
+      }
+    }
+    if (!allEpisodesQueue.length) return;
+    if (shuffle) {
+      allEpisodesQueue.sort(() => Math.random() - 0.5);
+    }
+    setVideoQueue(allEpisodesQueue, 0);
+    navigate(`/watch/episode/${allEpisodesQueue[0].id}?autoPlay=true&startFromBeginning=true`);
   };
 
   // Last watched episode & watched episodes tracker from localStorage and playback state
@@ -313,7 +344,7 @@ export default function SeriesDetails() {
     }
   }, [s, id]);
 
-  const handlePlayEpisode = (episode, season) => {
+  const handlePlayEpisode = (episode, season, isResumeExplicit = false) => {
     if (!season?.episodes) return;
     const epPoster = season.posters?.[0]?.thumb || season.posters?.[0]?.url || poster;
     const epIndex = season.episodes.findIndex(e => e.id === episode.id);
@@ -349,20 +380,27 @@ export default function SeriesDetails() {
       setLastWatchedEp(lastWatched);
     } catch {}
 
+    const epPos = episode.playback?.position || 0;
+    const epDur = episode.playback?.duration || episode.duration || 0;
+    // Only resume if explicitly requested (e.g. Resume button clicked)
+    const shouldResumeEp = isResumeExplicit && epPos > 5 && (!epDur || epPos < epDur * 0.9);
+
     if (activeRemoteSession) {
       playMediaOnTarget({
         type: 'episode',
         id: episode.id,
         title: `${s?.title || ''}: ${episode.title || (isArabic ? `حلقة ${episode.episode_number}` : `Episode ${episode.episode_number}`)}`,
         poster: epPoster,
-        currentTime: 0,
+        currentTime: shouldResumeEp ? Math.floor(epPos) : 0,
         duration: episode.duration || 0
       });
-      openFullRemote();
       return;
     }
 
-    navigate(`/watch/episode/${episode.id}`);
+    const timeQuery = shouldResumeEp 
+      ? `?t=${Math.floor(epPos)}&autoPlay=true&resume=true` 
+      : '?autoPlay=true&startFromBeginning=true';
+    navigate(`/watch/episode/${episode.id}${timeQuery}`);
   };
 
   // Determine target episode for Resume / Start Watching
@@ -416,7 +454,7 @@ export default function SeriesDetails() {
     if (selectedSeasonId !== targetSeason.id) {
       setSelectedSeasonId(targetSeason.id);
     }
-    handlePlayEpisode(targetEpisode, targetSeason);
+    handlePlayEpisode(targetEpisode, targetSeason, isResume);
   };
 
   if (isLoading) return (
@@ -505,7 +543,7 @@ export default function SeriesDetails() {
               </div>
 
               {/* Series Title */}
-              <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-black text-slate-900 dark:text-white drop-shadow-sm dark:drop-shadow-[0_4px_16px_rgba(0,0,0,0.95)] mb-2 tracking-tight">
+              <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-black text-slate-900 dark:text-white leading-normal py-1 drop-shadow-sm dark:drop-shadow-[0_4px_16px_rgba(0,0,0,0.95)] mb-2 tracking-tight">
                 {s.title}
                 {activeSeason?.title && activeSeason.title !== s.title && (
                   <span className="text-lg sm:text-2xl md:text-3xl text-amber-600 dark:text-amber-300 font-bold block sm:inline sm:ms-3 mt-1 sm:mt-0 drop-shadow-sm">
@@ -578,6 +616,18 @@ export default function SeriesDetails() {
                           ? (isArabic ? `استئناف — حلقة ${targetEpNum}` : `Resume — Ep ${targetEpNum}`)
                           : (isArabic ? `ابدأ المشاهدة — حلقة ${targetEpNum}` : `Start Watching — Ep ${targetEpNum}`)}
                       </span>
+                    </button>
+                  )}
+
+                  {/* Play Entire Series continuously from start */}
+                  {totalEpisodes > 0 && (
+                    <button
+                      onClick={() => handlePlayWholeSeries(false)}
+                      className="group flex items-center gap-2 px-4 py-2 sm:py-2.5 rounded-full bg-emerald-600/90 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm shadow-xl shadow-emerald-950/40 border border-emerald-400/30 transition-all duration-300 transform-gpu hover:scale-105 active:scale-95"
+                      title={isArabic ? 'تشغيل المسلسل بالكامل من بداية كل حلقة بدون انقطاع' : 'Play full series continuously from start'}
+                    >
+                      <Film size={14} className="flex-shrink-0" />
+                      <span>{isArabic ? 'تشغيل المسلسل بالكامل' : 'Play Full Series'}</span>
                     </button>
                   )}
 

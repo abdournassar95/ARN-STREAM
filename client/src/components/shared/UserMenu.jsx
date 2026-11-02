@@ -10,7 +10,7 @@ import {
   User, Shield, LogOut, KeyRound, Activity, ChevronDown, Check, AlertCircle, X, Sparkles, Play, RotateCcw
 } from 'lucide-react';
 
-export default function UserMenu({ isSidebar = false }) {
+export default function UserMenu({ isSidebar = false, avatarSize = 32, density = 'comfortable' }) {
   const navigate = useNavigate();
   const { t, i18n } = useTranslation();
   const isRtl = i18n.language === 'ar';
@@ -88,7 +88,7 @@ export default function UserMenu({ isSidebar = false }) {
         type="button"
         onClick={() => setOpen(!open)}
         className={isSidebar 
-          ? `flex items-center p-1 rounded-2xl transition w-full group/btn ${
+          ? `flex items-center p-1 rounded-2xl transition-all duration-350 ease-out w-full group/btn ${
               isDark ? 'hover:bg-white/10 text-white' : 'hover:bg-black/5 text-slate-800'
             }`
           : `flex items-center gap-2.5 px-3.5 py-1.5 rounded-full transition shadow-md backdrop-blur-md group ${
@@ -100,8 +100,8 @@ export default function UserMenu({ isSidebar = false }) {
       >
         {/* Avatar / Icon */}
         <div 
-          className={`w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center text-white font-bold text-xs shadow-md shadow-cyan-500/20 shrink-0 overflow-hidden ${isSidebar ? 'mx-auto group-hover/sidebar:mx-0' : ''}`}
-          style={{ width: 32, height: 32, minWidth: 32, minHeight: 32, maxWidth: 32, maxHeight: 32, borderRadius: '9999px' }}
+          className={`rounded-full bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center text-white font-bold text-xs shadow-md shadow-cyan-500/20 shrink-0 overflow-hidden transition-all duration-350 ease-out ${isSidebar ? 'mx-auto group-hover/sidebar:mx-0' : ''}`}
+          style={{ width: avatarSize, height: avatarSize, minWidth: avatarSize, minHeight: avatarSize, maxWidth: avatarSize, maxHeight: avatarSize, borderRadius: '9999px' }}
         >
           {user.avatar ? (
             <img 
@@ -116,13 +116,13 @@ export default function UserMenu({ isSidebar = false }) {
         </div>
 
         {/* Name & Role */}
-        <div className={isSidebar ? "opacity-0 w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:w-auto transition-all duration-180 ease-out flex flex-col text-start ps-2 whitespace-nowrap overflow-hidden" : "hidden sm:flex flex-col text-start pe-1"}>
-          <span className={`text-xs font-bold group-hover:text-cyan-400 transition line-clamp-1 max-w-[120px] ${
+        <div className={isSidebar ? "opacity-0 max-w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:max-w-[170px] transition-all duration-350 ease-out flex flex-col text-start ps-2 whitespace-nowrap overflow-hidden" : "hidden sm:flex flex-col text-start pe-1"}>
+          <span className={`text-xs sm:text-[13px] font-bold group-hover:text-cyan-400 transition line-clamp-1 max-w-[150px] ${
             isDark ? 'text-slate-100' : 'text-text'
           }`}>
             {user.display_name || user.username}
           </span>
-          <span className="text-[10px] text-text-muted line-clamp-1">
+          <span className="text-[10.5px] text-text-muted line-clamp-1">
             {roleLabels[user.role] || user.role}
           </span>
         </div>

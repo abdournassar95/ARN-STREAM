@@ -31,49 +31,62 @@ router.get('/artists', (req, res) => {
   sql += ` ORDER BY name ASC`;
   const artists = db.prepare(sql).all(...params);
 
+  // ─── تحميل مجمّع (Batch) بدلاً من ~6 استعلامات لكل فنان ───
+  const idsJson = JSON.stringify(artists.map(a => a.id));
+  const imgRows = db.prepare(`
+    SELECT artists.id AS aid,
+      (SELECT id FROM images WHERE media_type='artist' AND media_id=artists.id AND (image_type='poster' OR image_type='avatar') ORDER BY is_primary DESC, id DESC LIMIT 1) AS artistImgId,
+      (SELECT images.id FROM images JOIN albums ON albums.id=images.media_id AND images.media_type='album'
+         WHERE albums.artist_id=artists.id AND images.image_type='album_cover'
+         ORDER BY images.is_primary DESC, COALESCE(albums.year, 0) DESC, images.id DESC LIMIT 1) AS fallbackImgId
+    FROM artists WHERE artists.id IN (SELECT value FROM json_each(?))
+  `).all(idsJson);
+  const imgByArtist = new Map(imgRows.map(r => [r.aid, r.artistImgId || r.fallbackImgId || null]));
+
+  const albumsByArtist = new Map();
+  const albumRows = db.prepare(`
+    SELECT albums.id, albums.artist_id, albums.title, albums.year,
+      (SELECT COUNT(*) FROM tracks WHERE tracks.album_id = albums.id) AS tc
+    FROM albums WHERE albums.artist_id IN (SELECT value FROM json_each(?))
+  `).all(idsJson);
+  for (const al of albumRows) {
+    if (!al.tc) continue;
+    if (!albumsByArtist.has(al.artist_id)) albumsByArtist.set(al.artist_id, []);
+    albumsByArtist.get(al.artist_id).push(al);
+  }
+
+  const tagsByArtist = new Map();
+  const tagRows = db.prepare(`
+    SELECT media_tags.media_id AS aid, tags.* FROM tags JOIN media_tags ON tags.id=media_tags.tag_id
+    WHERE media_tags.media_type='artist' AND media_tags.media_id IN (SELECT value FROM json_each(?))
+  `).all(idsJson);
+  for (const { aid, ...tag } of tagRows) {
+    if (!tagsByArtist.has(aid)) tagsByArtist.set(aid, []);
+    tagsByArtist.get(aid).push(tag);
+  }
+
   const enriched = artists.map(a => {
-    // Strictly select poster or avatar for the artist card thumbnail; never select wide backdrops
-    const artistImg = db.prepare(`
-      SELECT id FROM images 
-      WHERE media_type='artist' AND media_id=? AND (image_type='poster' OR image_type='avatar') AND is_primary=1 LIMIT 1
-    `).get(a.id) || db.prepare(`
-      SELECT id FROM images 
-      WHERE media_type='artist' AND media_id=? AND (image_type='poster' OR image_type='avatar')
-      ORDER BY is_primary DESC, id DESC LIMIT 1
-    `).get(a.id);
+    const imgId = imgByArtist.get(a.id) || null;
+    const artistAlbums = albumsByArtist.get(a.id) || [];
+    const albumsCount = artistAlbums.length;
+    const tracksCount = artistAlbums.reduce((s, al) => s + al.tc, 0);
 
-    const fallback = db.prepare(`
-      SELECT images.id FROM images
-      JOIN albums ON albums.id=images.media_id AND images.media_type='album'
-      WHERE albums.artist_id=? AND images.image_type='album_cover'
-      ORDER BY images.is_primary DESC, COALESCE(albums.year, 0) DESC, images.id DESC LIMIT 1
-    `).get(a.id);
-    const imgId = artistImg?.id || fallback?.id || null;
-    const albumsCount = db.prepare(`SELECT COUNT(*) as c FROM albums WHERE artist_id=? AND EXISTS (SELECT 1 FROM tracks WHERE tracks.album_id = albums.id)`).get(a.id).c;
-    const tracksCount = db.prepare(`SELECT COUNT(*) as c FROM tracks JOIN albums ON albums.id=tracks.album_id WHERE albums.artist_id=?`).get(a.id).c;
-
-    // Check years from albums, extracting 4-digit years from album titles if year is not set
-    const artistAlbums = db.prepare(`SELECT id, title, year FROM albums WHERE artist_id=? AND EXISTS (SELECT 1 FROM tracks WHERE tracks.album_id = albums.id)`).all(a.id);
+    // Derive years from albums (extract 4-digit year from title if missing) — read-only, no writes during GET
     let minYear = null;
     let maxYear = null;
     for (const alb of artistAlbums) {
       let y = alb.year;
       if (!y && alb.title) {
         const m = alb.title.match(/\b(19\d\d|20\d\d)\b/);
-        if (m) {
-          y = parseInt(m[1], 10);
-          try { db.prepare('UPDATE albums SET year=? WHERE id=?').run(y, alb.id); } catch {}
-        }
+        if (m) y = parseInt(m[1], 10);
       }
       if (y && y > 1900 && y < 2100) {
         if (!minYear || y < minYear) minYear = y;
         if (!maxYear || y > maxYear) maxYear = y;
       }
     }
-
     const year = maxYear || minYear || null;
-
-    const tags = db.prepare(`SELECT tags.* FROM tags JOIN media_tags ON tags.id=media_tags.tag_id WHERE media_tags.media_type='artist' AND media_tags.media_id=?`).all(a.id);
+    const tags = tagsByArtist.get(a.id) || [];
 
     return {
       ...a,
@@ -193,19 +206,22 @@ router.get('/albums', (req, res) => {
   }
   if (conds.length) sql += ` WHERE ` + conds.join(' AND ');
 
+  // الغلاف وعدد المقاطع داخل نفس الاستعلام (إلغاء N+1)
+  sql = sql.replace(
+    'SELECT albums.*, artists.name as artistName FROM albums',
+    `SELECT albums.*, artists.name as artistName,
+      (SELECT id FROM images WHERE media_type='album' AND media_id=albums.id AND image_type='album_cover' AND is_primary=1 LIMIT 1) AS _coverId,
+      (SELECT COUNT(*) FROM tracks WHERE album_id=albums.id) AS _tracksCount
+    FROM albums`
+  );
   const albums = db.prepare(sql).all(...params);
-  const enriched = albums.map(al => {
+  const enriched = albums.map(({ _coverId, _tracksCount, ...al }) => {
     let year = al.year;
     if (!year && al.title) {
       const m = al.title.match(/\b(19\d\d|20\d\d)\b/);
-      if (m) {
-        year = parseInt(m[1], 10);
-        try { db.prepare('UPDATE albums SET year=? WHERE id=?').run(year, al.id); } catch {}
-      }
+      if (m) year = parseInt(m[1], 10);
     }
-    const img = db.prepare(`SELECT id FROM images WHERE media_type='album' AND media_id=? AND image_type='album_cover' AND is_primary=1`).get(al.id);
-    const tracksCount = db.prepare(`SELECT COUNT(*) as c FROM tracks WHERE album_id=?`).get(al.id).c;
-    return { ...al, year, cover: img ? `/api/image/${img.id}/thumb` : null, coverId: img?.id, tracksCount };
+    return { ...al, year, cover: _coverId ? `/api/image/${_coverId}/thumb` : null, coverId: _coverId || undefined, tracksCount: _tracksCount };
   });
 
   // Sort enriched albums
@@ -237,10 +253,16 @@ router.get('/albums/:id', (req, res) => {
   const tracks = db.prepare(`SELECT * FROM tracks WHERE album_id=? ORDER BY track_number, title`).all(album.id);
   const cover = db.prepare(`SELECT * FROM images WHERE media_type='album' AND media_id=? AND image_type='album_cover' ORDER BY is_primary DESC`).all(album.id);
   const rating = db.prepare(`SELECT * FROM ratings WHERE media_type='album' AND media_id=?`).get(album.id);
+  const userId = req.user ? req.user.id : 1;
+  const stmtTrackPlayback = db.prepare(`SELECT position, duration, updated_at FROM playback_state WHERE user_id = ? AND (media_type = 'track' OR media_type = 'audio') AND media_id = ?`);
   res.json({
     data: {
       ...album,
-      tracks: tracks.map(t => ({ ...t, url: `/api/stream/track/${t.id}` })),
+      tracks: tracks.map(t => ({
+        ...t,
+        url: `/api/stream/track/${t.id}`,
+        playback: stmtTrackPlayback.get(userId, t.id) || null
+      })),
       covers: cover.map(c => ({ id: c.id, url: `/api/image/${c.id}/full`, thumb: `/api/image/${c.id}/thumb`, is_primary: !!c.is_primary })),
       rating: rating?.rating || null
     }

@@ -19,7 +19,11 @@ import {
   fetchDatabaseRecords, updateDatabaseRecord, deleteDatabaseRecord,
   checkPathExists, batchRemapPaths, batchUpdateRecordsLibrary,
   batchDeleteDatabaseRecords, fetchLibraries, fetchLibraryContents,
-  clearLibraryContentsApi, createDatabaseUserApi, scanSingleLibrary
+  clearLibraryContentsApi, createDatabaseUserApi, scanSingleLibrary,
+  fetchHealthReport, checkLibraryIntegrityApi, detectRelocatedFilesApi,
+  applyRelocationsApi, pruneVerifiedMissingApi,
+  startMetadataAutoFetch, stopMetadataAutoFetch, pauseMetadataAutoFetch,
+  resumeMetadataAutoFetch, fetchMetadataAutoFetchStatus
 } from '../api/client';
 
 export default function DashboardDatabase() {
@@ -174,6 +178,152 @@ export default function DashboardDatabase() {
     }),
     enabled: subTab === 'explorer'
   });
+
+  // Auto-Fetch State
+  const [autoFetchStatus, setAutoFetchStatus] = useState({
+    isRunning: false,
+    isPaused: false,
+    total: 0,
+    processed: 0,
+    succeeded: 0,
+    failed: 0,
+    percent: 0,
+    currentItem: null
+  });
+
+  // Health & Relocations State
+  const [integrityReport, setIntegrityReport] = useState(null);
+  const [isCheckingIntegrity, setIsCheckingIntegrity] = useState(false);
+  const [relocationsData, setRelocationsData] = useState(null);
+  const [isDetectingRelocations, setIsDetectingRelocations] = useState(false);
+  const [isApplyingRelocations, setIsApplyingRelocations] = useState(false);
+  const [selectedAutoFetchLibId, setSelectedAutoFetchLibId] = useState('');
+  const [selectedHealthLibId, setSelectedHealthLibId] = useState('');
+  const [autoFetchForce, setAutoFetchForce] = useState(false);
+
+  useEffect(() => {
+    fetchMetadataAutoFetchStatus().then(data => {
+      if (data) setAutoFetchStatus(data);
+    }).catch(() => {});
+
+    fetchHealthReport().then(data => {
+      if (data?.cachedReport) setIntegrityReport(data.cachedReport);
+    }).catch(() => {});
+
+    const onAutoFetchProgress = (e) => {
+      if (e.detail) setAutoFetchStatus(e.detail);
+    };
+    const onAutoFetchCompleted = (e) => {
+      if (e.detail) setAutoFetchStatus(e.detail);
+      queryClient.invalidateQueries({ queryKey: ['database-stats'] });
+      refetchStats();
+    };
+    const onHealthCompleted = (e) => {
+      if (e.detail) setIntegrityReport(e.detail);
+      setIsCheckingIntegrity(false);
+      queryClient.invalidateQueries({ queryKey: ['database-stats'] });
+      refetchStats();
+    };
+
+    window.addEventListener('arn-metadata-fetch-progress', onAutoFetchProgress);
+    window.addEventListener('arn-metadata-fetch-completed', onAutoFetchCompleted);
+    window.addEventListener('arn-health-check-completed', onHealthCompleted);
+
+    return () => {
+      window.removeEventListener('arn-metadata-fetch-progress', onAutoFetchProgress);
+      window.removeEventListener('arn-metadata-fetch-completed', onAutoFetchCompleted);
+      window.removeEventListener('arn-health-check-completed', onHealthCompleted);
+    };
+  }, [queryClient, refetchStats]);
+
+  // Auto-Fetch Handlers
+  const handleStartAutoFetch = async (targetLibId = null, force = null) => {
+    try {
+      const libId = targetLibId != null && typeof targetLibId !== 'object' ? Number(targetLibId) : (selectedAutoFetchLibId ? Number(selectedAutoFetchLibId) : null);
+      const isForce = force !== null ? force : autoFetchForce;
+      const res = await startMetadataAutoFetch({ libraryId: libId, type: 'all', onlyMissingPosters: !isForce, forceAll: isForce });
+      showNotification(res.message || (isRtl ? 'تم بدء جلب الميتاداتا بنجاح.' : 'Metadata auto-fetch started.'));
+      if (res.data) {
+        setAutoFetchStatus(res.data);
+      }
+    } catch (err) {
+      showNotification(err.response?.data?.error?.message || err.message, 'error');
+    }
+  };
+
+  const handleStopAutoFetch = async () => {
+    try {
+      const res = await stopMetadataAutoFetch();
+      showNotification(res.message || (isRtl ? 'تم إيقاف عملية الجلب.' : 'Auto-fetch stopped.'));
+    } catch (err) {
+      showNotification(err.response?.data?.error?.message || err.message, 'error');
+    } finally {
+      setAutoFetchStatus(prev => ({ ...prev, isRunning: false, isPaused: false, currentItem: null, total: 0, processed: 0 }));
+    }
+  };
+
+  const handlePauseAutoFetch = async () => {
+    try {
+      await pauseMetadataAutoFetch();
+      setAutoFetchStatus(prev => ({ ...prev, isPaused: true }));
+    } catch (err) {
+      showNotification(err.response?.data?.error?.message || err.message, 'error');
+    }
+  };
+
+  const handleResumeAutoFetch = async () => {
+    try {
+      await resumeMetadataAutoFetch();
+      setAutoFetchStatus(prev => ({ ...prev, isPaused: false }));
+    } catch (err) {
+      showNotification(err.response?.data?.error?.message || err.message, 'error');
+    }
+  };
+
+  // Integrity & Relocations Handlers
+  const handleCheckIntegrityAndRelocations = async (targetLibId = null) => {
+    setIsCheckingIntegrity(true);
+    setRelocationsData(null);
+    const libId = targetLibId != null && typeof targetLibId !== 'object' ? Number(targetLibId) : (selectedHealthLibId ? Number(selectedHealthLibId) : null);
+    try {
+      const integrityRes = await checkLibraryIntegrityApi({ libraryId: libId });
+      setIntegrityReport(integrityRes.data);
+      showNotification(integrityRes.message || 'اكتمل فحص سلامة الملفات.');
+
+      if (integrityRes.data?.totalMissing > 0) {
+        setIsDetectingRelocations(true);
+        const relRes = await detectRelocatedFilesApi(integrityRes.data.missing, { libraryId: libId });
+        setRelocationsData(relRes.data);
+        setIsDetectingRelocations(false);
+        if (relRes.data?.relocations?.length > 0) {
+          showNotification(`تم اكتشاف ${relRes.data.relocations.length} ملف منقول يمكن إعادة ربطه!`);
+        }
+      }
+    } catch (err) {
+      showNotification(err.response?.data?.error?.message || err.message, 'error');
+    } finally {
+      setIsCheckingIntegrity(false);
+      setIsDetectingRelocations(false);
+    }
+  };
+
+  const handleApplyRelocations = async () => {
+    if (!relocationsData?.relocations?.length) return;
+    setIsApplyingRelocations(true);
+    try {
+      const res = await applyRelocationsApi(relocationsData.relocations);
+      showNotification(res.message || 'تمت إعادة ربط الملفات بنجاح.');
+      setRelocationsData(null);
+      queryClient.invalidateQueries({ queryKey: ['database-stats'] });
+      refetchStats();
+      const updated = await checkLibraryIntegrityApi();
+      setIntegrityReport(updated.data);
+    } catch (err) {
+      showNotification(err.response?.data?.error?.message || err.message, 'error');
+    } finally {
+      setIsApplyingRelocations(false);
+    }
+  };
 
   // Mutations
   const cleanOrphansMut = useMutation({
@@ -656,6 +806,211 @@ export default function DashboardDatabase() {
               </div>
             </div>
 
+            {/* Card 0.1: Automated Metadata & Artwork Fetcher */}
+            <div className="dash-card md:col-span-2 bg-gradient-to-r from-cyan-500/10 via-sky-500/10 to-transparent border border-cyan-500/30">
+              <div className="dash-card-inner p-4 space-y-3">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center flex-shrink-0 text-cyan-400 shadow-md">
+                      <Sparkles size={20} className={autoFetchStatus.isRunning && !autoFetchStatus.isPaused ? 'animate-pulse' : ''} />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-cyan-400 flex items-center gap-2">
+                        <span>{isRtl ? 'محرك جلب الميتاداتا والبوسترات آلياً (Auto-Fetcher)' : 'Automated Metadata & Artwork Fetcher'}</span>
+                        {autoFetchStatus.isRunning && (
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono border ${
+                            autoFetchStatus.isPaused
+                              ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                              : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30 animate-pulse'
+                          }`}>
+                            {autoFetchStatus.isPaused ? (isRtl ? 'متوقف مؤقتاً' : 'Paused') : `${autoFetchStatus.percent}%`}
+                          </span>
+                        )}
+                      </h3>
+                      <p className="text-xs mt-1 leading-relaxed" style={mutedStyle}>
+                        {isRtl
+                          ? 'فحص شامل وجلب آلي للبوسترات وخلفيات Fanart والقصة والتصنيفات من TMDB و Cinemeta لكافة الأفلام والمسلسلات التي تنقصها ملصقات أو بيانات.'
+                          : 'Deep automatic fetcher for posters, backdrops, plot, and genres from TMDB & Cinemeta for media missing artwork.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Auto-Fetch Controls */}
+                  <div className="flex flex-wrap items-center gap-2 shrink-0 self-end sm:self-center">
+                    <select value={selectedAutoFetchLibId} onChange={e => setSelectedAutoFetchLibId(e.target.value)} disabled={autoFetchStatus.isRunning} className="px-3 py-2 rounded-xl text-sm font-semibold bg-slate-900/70 border border-slate-700 text-slate-100 focus:outline-none focus:border-sky-400">
+                      <option value="">{isRtl ? 'كافة المكتبات' : 'All Libraries'}</option>
+                      {libraries.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                    </select>
+
+                    {!autoFetchStatus.isRunning && (
+                      <label className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer select-none px-2.5 py-2 bg-slate-900/60 border border-slate-700/60 rounded-xl hover:border-cyan-500/40 transition">
+                        <input
+                          type="checkbox"
+                          checked={autoFetchForce}
+                          onChange={(e) => setAutoFetchForce(e.target.checked)}
+                          className="w-3.5 h-3.5 rounded accent-cyan-500 cursor-pointer"
+                        />
+                        <span>{isRtl ? 'إعادة جلب الكل (إجباري)' : 'Force update all'}</span>
+                      </label>
+                    )}
+                    {!autoFetchStatus.isRunning ? (
+                      <button
+                        type="button"
+                        onClick={() => handleStartAutoFetch()}
+                        className="px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-lg shadow-cyan-500/25 active:scale-95 transition-all"
+                      >
+                        <Sparkles size={15} />
+                        <span>{isRtl ? 'بدء الجلب الآلي الآن' : 'Start Auto-Fetch'}</span>
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        {autoFetchStatus.isPaused ? (
+                          <button
+                            type="button"
+                            onClick={handleResumeAutoFetch}
+                            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 transition-all"
+                          >
+                            {isRtl ? 'استئناف' : 'Resume'}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={handlePauseAutoFetch}
+                            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 transition-all"
+                          >
+                            {isRtl ? 'إيقاف مؤقت' : 'Pause'}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleStopAutoFetch}
+                          className="px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 transition-all"
+                        >
+                          {isRtl ? 'إلغاء' : 'Stop'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Live Progress Bar when Running */}
+                {autoFetchStatus.isRunning && (
+                  <div className="pt-2 border-t border-cyan-500/20 space-y-2">
+                    <div className="flex items-center justify-between text-xs font-mono">
+                      <span className="text-slate-300 truncate max-w-[70%]">
+                        {autoFetchStatus.currentItem
+                          ? `${isRtl ? 'جاري جلب: ' : 'Fetching: '} ${autoFetchStatus.currentItem.title}`
+                          : (isRtl ? 'تحضير قائمة الأعمال...' : 'Preparing queue...')}
+                      </span>
+                      <span className="text-cyan-400 font-bold">
+                        {autoFetchStatus.processed} / {autoFetchStatus.total} ({autoFetchStatus.percent}%)
+                      </span>
+                    </div>
+
+                    <div className="h-2 w-full bg-slate-900 rounded-full overflow-hidden border border-white/10">
+                      <div
+                        className="h-full bg-gradient-to-r from-cyan-500 via-sky-400 to-emerald-400 transition-all duration-300"
+                        style={{ width: `${Math.max(3, autoFetchStatus.percent)}%` }}
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-4 text-[11px] text-slate-400 font-mono">
+                      <span className="text-emerald-400">✓ {isRtl ? 'تم بنجاح:' : 'Succeeded:'} {autoFetchStatus.succeeded}</span>
+                      <span className="text-rose-400">✗ {isRtl ? 'فشل/غير متاح:' : 'Failed:'} {autoFetchStatus.failed}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Card 0.2: Smart Reconnect & Integrity */}
+            <div className="dash-card md:col-span-2 bg-gradient-to-r from-purple-500/10 via-amber-500/10 to-transparent border border-purple-500/30">
+              <div className="dash-card-inner p-4 space-y-3">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-purple-500/20 border border-purple-500/30 flex items-center justify-center flex-shrink-0 text-purple-400 shadow-md">
+                      <ShieldCheck size={20} className={isCheckingIntegrity ? 'animate-spin' : ''} />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-purple-300 flex items-center gap-2">
+                        <span>{isRtl ? 'فحص السلامة المتقدم وإعادة الربط الذكي للملفات المنقولة' : 'Advanced Library Health & Smart Relocate'}</span>
+                        {relocationsData?.relocations?.length > 0 && (
+                          <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-mono border border-amber-500/30 font-bold">
+                            {relocationsData.relocations.length} {isRtl ? 'ملف منقول مكتشف' : 'relocations detected'}
+                          </span>
+                        )}
+                      </h3>
+                      <p className="text-xs mt-1 leading-relaxed" style={mutedStyle}>
+                        {isRtl
+                          ? 'التعرف على الملفات التي تم نقلها أو تغيير مسارها على الأقراص وإعادة ربطها فورياً دون فقدان تقدم المشاهدة أو التقييمات أو المفضلة.'
+                          : 'Detect moved files on disk and reconnect them to database records preserving watch progress, ratings, and favorites.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 shrink-0 self-end sm:self-center">
+                    <select value={selectedHealthLibId} onChange={e => setSelectedHealthLibId(e.target.value)} disabled={isCheckingIntegrity} className="px-3 py-2 rounded-xl text-sm font-semibold bg-slate-900/70 border border-slate-700 text-slate-100 focus:outline-none focus:border-sky-400">
+                      <option value="">{isRtl ? 'كافة المكتبات' : 'All Libraries'}</option>
+                      {libraries.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => handleCheckIntegrityAndRelocations()}
+                      disabled={isCheckingIntegrity || isDetectingRelocations}
+                      className="px-3.5 py-2 rounded-xl text-xs font-bold bg-purple-500/20 hover:bg-purple-500/30 border border-purple-400/30 text-purple-200 flex items-center gap-2 transition-all active:scale-95 shadow-sm"
+                    >
+                      {isCheckingIntegrity || isDetectingRelocations ? <RefreshCw size={14} className="animate-spin" /> : <FileSearch size={14} />}
+                      <span>{isRtl ? 'فحص الروابط وكشف المنقول' : 'Check Integrity & Relocations'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Relocations Table if Detected */}
+                {relocationsData?.relocations?.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-purple-500/20 space-y-3 animate-fadeIn">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                        <AlertTriangle size={14} />
+                        <span>{isRtl ? `تم اكتشاف ${relocationsData.relocations.length} ملف تم نقله لمكان جديد:` : `${relocationsData.relocations.length} moved files ready to reconnect:`}</span>
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={handleApplyRelocations}
+                        disabled={isApplyingRelocations}
+                        className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 flex items-center gap-1.5 shadow-md shadow-emerald-500/20 active:scale-95 transition-all"
+                      >
+                        {isApplyingRelocations ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                        <span>{isRtl ? 'إعادة ربط الكل وحفظ سجل المشاهدة' : 'Reconnect All (Preserve Progress)'}</span>
+                      </button>
+                    </div>
+
+                    <div className="max-h-48 overflow-y-auto space-y-1.5 custom-scrollbar pe-1">
+                      {relocationsData.relocations.map((rel, idx) => (
+                        <div
+                          key={idx}
+                          className="p-2.5 rounded-xl bg-slate-900/80 border border-white/10 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="font-bold text-slate-200 truncate">{rel.title}</div>
+                            <div className="text-[10px] text-rose-400/80 font-mono truncate" title={rel.oldPath}>
+                              {isRtl ? 'القديم: ' : 'Old: '}{rel.oldPath}
+                            </div>
+                            <div className="text-[10px] text-emerald-400 font-mono truncate" title={rel.newPath}>
+                              {isRtl ? 'الجديد: ' : 'New: '}{rel.newPath}
+                            </div>
+                          </div>
+                          <span className="px-2 py-0.5 rounded-md text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono shrink-0">
+                            {rel.confidence === 'exact' ? (isRtl ? 'تطابق تام' : 'Exact') : (isRtl ? 'تطابق عالي' : 'High')}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* Card 1: Clean Orphaned Data */}
             <div className="dash-card">
               <div className="dash-card-inner p-4 flex flex-col justify-between h-full space-y-3">
@@ -1053,6 +1408,23 @@ export default function DashboardDatabase() {
                     >
                       <FileX2 size={13} />
                       <span>{isRtl ? 'المفقودة فقط' : 'Missing Only'}</span>
+                    </button>
+
+                    <button
+                      onClick={() => handleStartAutoFetch(activeLibrary.id)}
+                      disabled={autoFetchStatus.isRunning || activeLibrary.type === 'music'}
+                      className="px-3 py-1.5 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 text-sky-300 text-xs font-bold flex items-center gap-1.5 transition disabled:opacity-50"
+                    >
+                      <Sparkles size={13} />
+                      <span>{isRtl ? 'جلب ميتاداتا هذه المكتبة' : 'Fetch Metadata'}</span>
+                    </button>
+                    <button
+                      onClick={() => handleCheckIntegrityAndRelocations(activeLibrary.id)}
+                      disabled={isCheckingIntegrity || isDetectingRelocations}
+                      className="px-3 py-1.5 rounded-xl bg-violet-500/15 hover:bg-violet-500/25 border border-violet-500/30 text-violet-300 text-xs font-bold flex items-center gap-1.5 transition disabled:opacity-50"
+                    >
+                      <ShieldCheck size={13} className={isCheckingIntegrity ? 'animate-spin' : ''} />
+                      <span>{isRtl ? 'فحص سلامة هذه المكتبة' : 'Check Integrity'}</span>
                     </button>
 
                     {/* Scan this library button */}

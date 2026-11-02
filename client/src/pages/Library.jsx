@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useDeferredValue, useRef } from 'react';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { useParams, Link, useNavigate } from 'react-router-dom';
@@ -12,6 +12,7 @@ import client from '../api/client';
 import AddToPlaylist from '../components/music/AddToPlaylist';
 import AddToPlaylistModal from '../components/shared/AddToPlaylistModal';
 import Spinner from '../components/shared/Spinner';
+import { MediaGridSkeleton } from '../components/shared/LoadingSpinner';
 
 import { LayoutGrid, List, Columns, Maximize2, Play, Pause, BookOpen, Music, Users, Disc3, Radio, RefreshCw, Minus, Plus, Shuffle, CheckSquare, ListMusic, ListVideo, ListPlus, Check, Loader2, Trash2, Edit2, Search, Download } from 'lucide-react';
 import { usePlayerStore } from '../store/usePlayerStore';
@@ -305,7 +306,7 @@ export default function Library() {
 
       setVideoQueue(queue, 0);
       const firstType = queue[0].type;
-      navigate(`/watch/${firstType}/${queue[0].id}`);
+      navigate(`/watch/${firstType}/${queue[0].id}?autoPlay=true&startFromBeginning=true`);
     } finally {
       setIsBatchLoading(false);
     }
@@ -429,7 +430,7 @@ export default function Library() {
 
       setVideoQueue(queue, 0);
       const firstType = queue[0].type;
-      navigate(`/watch/${firstType}/${queue[0].id}`);
+      navigate(`/watch/${firstType}/${queue[0].id}?autoPlay=true&startFromBeginning=true`);
     } finally {
       setIsBatchLoading(false);
     }
@@ -493,10 +494,12 @@ export default function Library() {
   };
 
   const [bgImages, setBgImages] = useState([]);
-  const [visibleCount, setVisibleCount] = useState(60);
+  const [visibleCount, setVisibleCount] = useState(80);
+  const deferredSearchTerm = useDeferredValue(searchTerm);
+  const sentinelRef = useRef(null);
 
   const { data: library, isLoading } = useQuery({ 
-    queryKey: ['library', id, sort, order, mediaView], 
+    queryKey: ['library', String(id), sort, order, mediaView], 
     queryFn: () => fetchLibrary(id, { sort, order, view: mediaView, limit: 10000 }) 
   });
 
@@ -504,8 +507,8 @@ export default function Library() {
 
   const displayedItems = useMemo(() => {
     if (!library?.items) return [];
-    if (!searchTerm.trim()) return library.items;
-    const q = searchTerm.toLowerCase().trim();
+    if (!deferredSearchTerm.trim()) return library.items;
+    const q = deferredSearchTerm.toLowerCase().trim();
     return library.items.filter(item => {
       const title = (item.title || item.name || '').toLowerCase();
       const plot = (item.plot || '').toLowerCase();
@@ -514,19 +517,35 @@ export default function Library() {
       const album = (item.albumTitle || '').toLowerCase();
       return title.includes(q) || plot.includes(q) || year.includes(q) || artist.includes(q) || album.includes(q);
     });
-  }, [library?.items, searchTerm]);
+  }, [library?.items, deferredSearchTerm]);
 
-  // Always scroll to the top of the page when opening or switching a library
+  // Always scroll to the top and reset initial batch on library/view change
   useEffect(() => {
+    setVisibleCount(80);
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
     if (document.documentElement) document.documentElement.scrollTop = 0;
     if (document.body) document.body.scrollTop = 0;
-  }, [id]);
+  }, [id, mediaView, deferredSearchTerm]);
 
-  // Display all items from the beginning of the page without truncation
+  // Progressive infinite rendering: mount 80 items initially (<12ms), auto-expand smoothly on scroll
   const visibleItems = useMemo(() => {
-    return displayedItems;
-  }, [displayedItems]);
+    return displayedItems.slice(0, visibleCount);
+  }, [displayedItems, visibleCount]);
+
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || visibleCount >= displayedItems.length) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setVisibleCount((c) => Math.min(displayedItems.length, c + 80));
+        }
+      },
+      { rootMargin: '600px' }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [visibleCount, displayedItems.length]);
 
   // Background randomizer with stable dependencies
   useEffect(() => {
@@ -545,7 +564,15 @@ export default function Library() {
     return () => clearInterval(iv);
   }, [id, library?.items?.length]);
 
-  if (isLoading) return <div className="min-h-screen bg-bg"><TopBar variant={library?.type === 'music' ? 'music' : 'movies'}/><div className="flex items-center justify-center h-[60vh]"><Spinner/></div></div>;
+  if (isLoading) return (
+    <div className="min-h-screen bg-bg">
+      <TopBar variant={library?.type === 'music' ? 'music' : 'movies'} />
+      <main className="page-content-offset px-4 sm:px-6 md:px-10 pt-20 md:pt-8 pb-16 space-y-6">
+        <div className="h-24 w-full rounded-3xl arn-skeleton border border-white/10" />
+        <MediaGridSkeleton count={14} cardMinSize={cardMinSize} />
+      </main>
+    </div>
+  );
   if (!library) return <div className="min-h-screen bg-bg"><TopBar/><div className="text-center p-10 text-muted">{t('errors.notFound')}</div></div>;
 
   const isAudio = library.type === 'music';
@@ -809,6 +836,7 @@ export default function Library() {
                   step="10"
                   value={cardMinSize}
                   onChange={(e) => setCardMinSize(Number(e.target.value))}
+                  dir="ltr"
                   className="w-16 sm:w-20 md:w-24 h-1.5 bg-slate-200 dark:bg-surface rounded-lg appearance-none cursor-pointer accent-primaryMovies"
                   title={`${cardMinSize}px`}
                 />
@@ -1206,12 +1234,12 @@ export default function Library() {
               )
             )}
 
-            {/* Progressive batch rendering - Load More button (hidden for movies and series as all items are displayed upfront) */}
-            {!isMovies && displayedItems.length > visibleCount && (
-              <div className="flex justify-center mt-10 pb-6">
+            {/* Progressive Infinite Scroll Sentinel + Manual Fallback */}
+            {displayedItems.length > visibleCount && (
+              <div ref={sentinelRef} className="flex justify-center mt-8 pb-6">
                 <button
                   type="button"
-                  onClick={() => setVisibleCount(c => c + 60)}
+                  onClick={() => setVisibleCount(c => c + 80)}
                   className="px-6 py-2.5 rounded-2xl bg-white dark:bg-surface border border-slate-200/80 dark:border-border/60 hover:bg-slate-50 dark:hover:bg-surfaceHover text-text font-semibold text-xs shadow-md transition active:scale-95 flex items-center gap-2"
                 >
                   <span>{isRtl ? `عرض المزيد (${displayedItems.length - visibleCount} متبقية)` : `Load More (${displayedItems.length - visibleCount} remaining)`}</span>

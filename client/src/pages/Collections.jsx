@@ -92,7 +92,7 @@ export default function Collections() {
 
     setVideoQueue(queue, startIndex);
     const startItem = queue[startIndex] || queue[0];
-    navigate(`/watch/${startItem.type}/${startItem.id}`);
+    navigate(`/watch/${startItem.type}/${startItem.id}?autoPlay=true&startFromBeginning=true`);
   };
 
   // If viewing single collection details

@@ -4,9 +4,12 @@ import { persist } from 'zustand/middleware';
 export const useSettingsStore = create(
   persist(
     (set) => ({
-      // Display Settings
+      // Display & GPU Performance Settings
       theme: 'dark', // dark, light, system
       enableBlur: true,
+      performanceMode: 'ultra', // 'ultra' (Full Cosmic Glass) | 'turbo' (Eco GPU 120fps)
+      ambilightEnabled: true,   // Dynamic Cinema Ambilight glow in video player
+      commandPaletteOpen: false,
       defaultLibraryView: 'grid', // grid, list, compact, wide
       cardMinSize: 180, // min card width in pixels (130px - 320px)
       
@@ -58,6 +61,15 @@ export const useSettingsStore = create(
       // Actions
       setTheme: (theme) => set({ theme }),
       setEnableBlur: (enableBlur) => set({ enableBlur }),
+      setPerformanceMode: (performanceMode) => set({ performanceMode, enableBlur: performanceMode !== 'turbo' }),
+      togglePerformanceMode: () => set((s) => {
+        const next = s.performanceMode === 'turbo' ? 'ultra' : 'turbo';
+        return { performanceMode: next, enableBlur: next !== 'turbo' };
+      }),
+      setAmbilightEnabled: (ambilightEnabled) => set({ ambilightEnabled: !!ambilightEnabled }),
+      toggleAmbilight: () => set((s) => ({ ambilightEnabled: !s.ambilightEnabled })),
+      setCommandPaletteOpen: (open) => set({ commandPaletteOpen: !!open }),
+      toggleCommandPalette: () => set((s) => ({ commandPaletteOpen: !s.commandPaletteOpen })),
       setDefaultLibraryView: (view) => set({ defaultLibraryView: view }),
       setCardMinSize: (size) => set({ cardMinSize: Math.max(120, Math.min(340, Number(size) || 180)) }),
 
@@ -102,6 +114,10 @@ export const useSettingsStore = create(
     }),
     {
       name: 'personal-stream-settings', // unique name
+      partialize: (state) => {
+        const { commandPaletteOpen, ...rest } = state;
+        return rest;
+      }
     }
   )
 );

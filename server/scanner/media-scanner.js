@@ -9,26 +9,31 @@ import {
 import { processAndCacheImage, extractAndCacheEmbeddedArt } from '../services/image-cache.js';
 
 import db, { getSetting, getAllLibraries, getLibraryById, cleanupEmptyAlbums, cleanupEmptyArtists, cleanupEmptySeasons, cleanupEmptySeries } from '../db.js';
+import notificationManager from '../services/notification-manager.js';
 
-function assignTagsToMedia(genres, mediaType, mediaId) {
-  if (!genres || !genres.length) return;
-  const insertTag = db.prepare('INSERT OR IGNORE INTO tags (name) VALUES (?)');
-  const getTag = db.prepare('SELECT id FROM tags WHERE name = ?');
-  const insertMediaTag = db.prepare('INSERT OR IGNORE INTO media_tags (tag_id, media_type, media_id) VALUES (?, ?, ?)');
-  const incrementUsage = db.prepare('UPDATE tags SET usage_count = usage_count + 1 WHERE id = ?');
-  
+const insertTagStmt = db.prepare('INSERT OR IGNORE INTO tags (name) VALUES (?)');
+const getTagStmt = db.prepare('SELECT id FROM tags WHERE name = ?');
+const insertMediaTagStmt = db.prepare('INSERT OR IGNORE INTO media_tags (tag_id, media_type, media_id) VALUES (?, ?, ?)');
+const incrementUsageStmt = db.prepare('UPDATE tags SET usage_count = usage_count + 1 WHERE id = ?');
+
+const assignTagsBatchTx = db.transaction((genres, mediaType, mediaId) => {
   for (const g of genres) {
     if (!g) continue;
     let name = g.trim();
     if (!name) continue;
     name = name.charAt(0).toUpperCase() + name.slice(1);
-    insertTag.run(name);
-    const tag = getTag.get(name);
+    insertTagStmt.run(name);
+    const tag = getTagStmt.get(name);
     if (tag) {
-      const res = insertMediaTag.run(tag.id, mediaType, mediaId);
-      if (res.changes > 0) incrementUsage.run(tag.id);
+      const res = insertMediaTagStmt.run(tag.id, mediaType, mediaId);
+      if (res.changes > 0) incrementUsageStmt.run(tag.id);
     }
   }
+});
+
+function assignTagsToMedia(genres, mediaType, mediaId) {
+  if (!genres || !genres.length) return;
+  assignTagsBatchTx(genres, mediaType, mediaId);
 }
 
 export function countAllFiles(libraries) {
@@ -128,6 +133,17 @@ export async function scanLibrary(libraryId, options = {}) {
   });
 
   console.log(`[Scanner] Targeted scan complete for "${lib.name}":`, stats);
+  try {
+    notificationManager.notify({
+      title: `اكتمل فحص ${lib.name}`,
+      message: stats.newItemsList.length > 0
+        ? `تم اكتشاف وإضافة ${stats.newItemsList.length} عنصراً جديداً إلى المكتبة.`
+        : `المكتبة محدثة بالكامل ولا توجد عناصر جديدة.`,
+      type: 'info',
+      category: 'scan',
+      link: `/library/${lib.id}`
+    });
+  } catch {}
   return stats;
 }
 
@@ -203,6 +219,17 @@ export async function scanAll(options = {}) {
   });
 
   console.log('[Scanner] Scan complete', stats);
+  try {
+    notificationManager.notify({
+      title: 'اكتمل فحص كافة المكتبات',
+      message: stats.newItemsList.length > 0
+        ? `تم العثور على ${stats.newItemsList.length} عنصراً جديداً في المكتبات.`
+        : 'تمت مزامنة وفحص كافة المكتبات بنجاح.',
+      type: stats.newItemsList.length > 0 ? 'success' : 'info',
+      category: 'scan',
+      link: '/'
+    });
+  } catch {}
   return stats;
 }
 
@@ -249,6 +276,73 @@ async function scanMovies(stats, moviesRoot, lib, tracker) {
       plot = COALESCE(excluded.plot, movies.plot),
       library_id = excluded.library_id
   `);
+  const getMovieByPath = db.prepare('SELECT id FROM movies WHERE path = ?');
+  const insertMovieRating = db.prepare(`
+    INSERT INTO ratings (user_id, media_type, media_id, rating, rated_at)
+    VALUES (1, 'movie', ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(user_id, media_type, media_id) DO UPDATE SET rating=excluded.rating
+  `);
+
+  // Batch SQLite Transaction for inserting/updating movies without per-file fsync overhead
+  const commitMoviesBatch = db.transaction((batch) => {
+    for (const item of batch) {
+      insertMovie.run(
+        item.title,
+        item.year,
+        item.fullPath,
+        item.probe.duration,
+        item.probe.resolution,
+        item.probe.video_codec,
+        item.probe.audio_codec,
+        item.plot,
+        libraryId
+      );
+
+      const movieRecord = getMovieByPath.get(item.fullPath);
+      if (movieRecord) {
+        item.movieId = movieRecord.id;
+        if (item.nfoData?.rating) {
+          let normalizedRating = item.nfoData.rating > 5 ? item.nfoData.rating / 2 : item.nfoData.rating;
+          normalizedRating = Math.round(normalizedRating * 2) / 2;
+          if (normalizedRating >= 0.5 && normalizedRating <= 5.0) {
+            insertMovieRating.run(movieRecord.id, normalizedRating);
+          }
+        }
+
+        if (item.nfoData?.genres) {
+          assignTagsToMedia(item.nfoData.genres, 'movie', movieRecord.id);
+        }
+      }
+    }
+  });
+
+  const pendingBatch = [];
+  const MOVIE_BATCH_SIZE = 25;
+
+  async function flushMoviesBatch() {
+    if (!pendingBatch.length) return;
+    try {
+      commitMoviesBatch(pendingBatch);
+      stats.movies += pendingBatch.length;
+    } catch (batchErr) {
+      // Safe fallback to one-by-one execution
+      for (const item of pendingBatch) {
+        try {
+          commitMoviesBatch([item]);
+          stats.movies++;
+        } catch (e) {
+          stats.errors.push(`Movie ${item.filename}: ${e.message}`);
+        }
+      }
+    }
+
+    for (const item of pendingBatch) {
+      if (item.movieId) {
+        await findAndAttachMovieImages(item.dir, item.filename, item.base, item.movieId);
+      }
+    }
+    pendingBatch.length = 0;
+  }
 
   for (const { fullPath, dir, filename } of videoFiles) {
     tracker?.notify(filename, lib, 'movies');
@@ -302,46 +396,24 @@ async function scanMovies(stats, moviesRoot, lib, tracker) {
       } catch {}
     }
 
-    try {
-      insertMovie.run(
-        title,
-        year,
-        fullPath,
-        probe.duration,
-        probe.resolution,
-        probe.video_codec,
-        probe.audio_codec,
-        plot,
-        libraryId
-      );
-      stats.movies++;
+    pendingBatch.push({
+      dir,
+      filename,
+      base,
+      fullPath,
+      title,
+      year,
+      plot,
+      probe,
+      nfoData
+    });
 
-      const movieRecord = db.prepare('SELECT id FROM movies WHERE path = ?').get(fullPath);
-      if (movieRecord && nfoData?.rating) {
-        // Normalize rating to 0.5 - 5.0 (NFO usually 0-10)
-        let normalizedRating = nfoData.rating > 5 ? nfoData.rating / 2 : nfoData.rating;
-        normalizedRating = Math.round(normalizedRating * 2) / 2; // round to half step
-        if (normalizedRating >= 0.5 && normalizedRating <= 5.0) {
-          db.prepare(`
-            INSERT INTO ratings (user_id, media_type, media_id, rating, rated_at)
-            VALUES (1, 'movie', ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(user_id, media_type, media_id) DO UPDATE SET rating=excluded.rating
-          `).run(movieRecord.id, normalizedRating);
-        }
-      }
-
-      if (movieRecord && nfoData?.genres) {
-        assignTagsToMedia(nfoData.genres, 'movie', movieRecord.id);
-      }
-
-      // Check poster & backdrop in the same directory
-      if (movieRecord) {
-        await findAndAttachMovieImages(dir, filename, base, movieRecord.id);
-      }
-    } catch (e) {
-      stats.errors.push(`Movie ${filename}: ${e.message}`);
+    if (pendingBatch.length >= MOVIE_BATCH_SIZE) {
+      await flushMoviesBatch();
     }
   }
+
+  await flushMoviesBatch();
 }
 
 async function findAndAttachMovieImages(dir, filename, base, movieId) {
@@ -654,6 +726,34 @@ async function scanShows(stats, showsRoot, lib, tracker) {
       const hasAnyExplicit = explicitNumbers.size > 0;
       let nextAutoNumber = 1;
 
+      // Batch SQLite Transaction for inserting/updating episodes without per-episode fsync overhead
+      const commitEpisodesBatch = db.transaction((batch) => {
+        for (const ep of batch) {
+          insertEpisode.run(ep.seasonId, ep.epNumber, ep.epTitle, ep.fullPath, ep.probe.duration, ep.probe.resolution);
+        }
+      });
+
+      const pendingEpisodes = [];
+      const EPISODE_BATCH_SIZE = 30;
+
+      function flushEpisodesBatch() {
+        if (!pendingEpisodes.length) return;
+        try {
+          commitEpisodesBatch(pendingEpisodes);
+          stats.episodes += pendingEpisodes.length;
+        } catch (batchErr) {
+          for (const ep of pendingEpisodes) {
+            try {
+              commitEpisodesBatch([ep]);
+              stats.episodes++;
+            } catch (e) {
+              stats.errors.push(e.message);
+            }
+          }
+        }
+        pendingEpisodes.length = 0;
+      }
+
       for (let i = 0; i < sVideos.length; i++) {
         const video = sVideos[i];
         tracker?.notify(video.filename, lib, 'shows');
@@ -730,13 +830,20 @@ async function scanShows(stats, showsRoot, lib, tracker) {
           } catch {}
         }
 
-        try {
-          insertEpisode.run(seasonId, epNumber, epTitle, video.fullPath, probe.duration, probe.resolution);
-          stats.episodes++;
-        } catch (e) {
-          stats.errors.push(e.message);
+        pendingEpisodes.push({
+          seasonId,
+          epNumber,
+          epTitle,
+          fullPath: video.fullPath,
+          probe
+        });
+
+        if (pendingEpisodes.length >= EPISODE_BATCH_SIZE) {
+          flushEpisodesBatch();
         }
       }
+
+      flushEpisodesBatch();
     }
 
     // Attach season posters if available
@@ -868,6 +975,9 @@ async function scanMusic(stats, musicRoot, lib, tracker) {
   const getArtist = db.prepare('SELECT id FROM artists WHERE name = ?');
   const insertAlbum = db.prepare('INSERT OR IGNORE INTO albums (artist_id, title, year, library_id) VALUES (?, ?, ?, ?)');
   const getAlbum = db.prepare('SELECT id FROM albums WHERE artist_id = ? AND title = ?');
+  const getAlbumsByArtist = db.prepare('SELECT id, title FROM albums WHERE artist_id = ?');
+  const updateAlbumYear = db.prepare('UPDATE albums SET year = COALESCE(year, ?), library_id = COALESCE(library_id, ?) WHERE id = ?');
+  const updateAlbumLib = db.prepare('UPDATE albums SET library_id = COALESCE(library_id, ?) WHERE id = ?');
   const insertTrack = db.prepare(`
     INSERT INTO tracks (album_id, title, track_number, duration, path, library_id, lyrics)
     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -878,12 +988,138 @@ async function scanMusic(stats, musicRoot, lib, tracker) {
       library_id = excluded.library_id,
       lyrics = COALESCE(excluded.lyrics, tracks.lyrics)
   `);
+  const getExistingTrack = db.prepare(`
+    SELECT t.id, t.album_id, a.artist_id 
+    FROM tracks t 
+    JOIN albums a ON t.album_id = a.id 
+    WHERE t.path = ?
+  `);
+  const getArtistByDir = db.prepare(`
+    SELECT a.artist_id 
+    FROM tracks t 
+    JOIN albums a ON t.album_id = a.id 
+    WHERE t.path LIKE ? 
+    LIMIT 1
+  `);
+  const getTrackByPath = db.prepare('SELECT id FROM tracks WHERE path = ?');
+  const hasCoverStmt = db.prepare('SELECT 1 FROM images WHERE media_type = ? AND media_id = ?');
 
-  const audioFiles = findAudioFilesRecursive(musicRoot, 0, 5);
-  console.log(`[Scanner] Found ${audioFiles.length} audio files in music path`);
+  // SQLite Batch Transaction for music tracks, albums, artists and tags
+  const commitMusicBatch = db.transaction((batch) => {
+    for (const item of batch) {
+      const { fullPath, filename, folderArtist, folderAlbum, meta, parsedFilename, extractedLyrics } = item;
+      const artistName = folderArtist || meta.artist || 'فنان غير معروف';
+      const albumTitle = folderAlbum || meta.album || 'أغاني منفردة';
+      const trackTitle = meta.title || parsedFilename.title || path.basename(filename, path.extname(filename));
+      const trackNum = meta.trackNumber || parsedFilename.track || null;
+      const duration = meta.duration || null;
+      const yearMatch = albumTitle?.match(/\b(19\d\d|20\d\d)\b/);
+      const year = meta.year || (yearMatch ? parseInt(yearMatch[1], 10) : null);
 
-  // Cache existing artists in memory for fast normalized matching
-  let cachedArtists = db.prepare('SELECT id, name FROM artists').all();
+      const existingTrack = getExistingTrack.get(fullPath);
+      let artistId = null;
+      let albumId = null;
+
+      if (existingTrack) {
+        artistId = existingTrack.artist_id;
+        albumId = existingTrack.album_id;
+      } else {
+        if (folderArtist) {
+          const artistDir = path.join(musicRoot, folderArtist);
+          const matchDir = getArtistByDir.get(artistDir + '%');
+          if (matchDir) artistId = matchDir.artist_id;
+        }
+
+        if (!artistId) {
+          const exactArtist = getArtist.get(artistName);
+          if (exactArtist) artistId = exactArtist.id;
+        }
+
+        if (!artistId) {
+          const targetNorm = norm(artistName);
+          const found = cachedArtists.find(a => norm(a.name) === targetNorm);
+          if (found) artistId = found.id;
+        }
+
+        if (!artistId) {
+          insertArtist.run(artistName, libraryId);
+          const newArtist = getArtist.get(artistName);
+          if (newArtist) {
+            artistId = newArtist.id;
+            cachedArtists.push({ id: artistId, name: artistName });
+          }
+        }
+
+        if (!artistId) continue;
+
+        let albumRow = getAlbum.get(artistId, albumTitle);
+        if (!albumRow) {
+          const targetAlbNorm = norm(albumTitle);
+          const existingAlbums = getAlbumsByArtist.all(artistId);
+          albumRow = existingAlbums.find(a => norm(a.title) === targetAlbNorm);
+        }
+
+        if (!albumRow) {
+          insertAlbum.run(artistId, albumTitle, year, libraryId);
+          albumRow = getAlbum.get(artistId, albumTitle);
+        }
+
+        if (!albumRow) continue;
+        albumId = albumRow.id;
+      }
+
+      if (year) {
+        updateAlbumYear.run(year, libraryId, albumId);
+      } else {
+        updateAlbumLib.run(libraryId, albumId);
+      }
+
+      insertTrack.run(albumId, trackTitle, trackNum, duration, fullPath, libraryId, extractedLyrics);
+      item.albumId = albumId;
+      item.artistId = artistId;
+
+      const trackRow = getTrackByPath.get(fullPath);
+      if (trackRow && meta.genres) {
+        assignTagsToMedia(meta.genres, 'track', trackRow.id);
+        assignTagsToMedia(meta.genres, 'album', albumId);
+        assignTagsToMedia(meta.genres, 'artist', artistId);
+      }
+    }
+  });
+
+  const pendingMusicBatch = [];
+  const MUSIC_BATCH_SIZE = 35;
+
+  async function flushMusicBatch() {
+    if (!pendingMusicBatch.length) return;
+    try {
+      commitMusicBatch(pendingMusicBatch);
+      stats.tracks += pendingMusicBatch.length;
+    } catch (batchErr) {
+      for (const item of pendingMusicBatch) {
+        try {
+          commitMusicBatch([item]);
+          stats.tracks++;
+        } catch (singleErr) {
+          stats.errors.push(`Track ${item.filename}: ${singleErr.message}`);
+        }
+      }
+    }
+
+    // Process embedded album art outside the transaction
+    for (const item of pendingMusicBatch) {
+      if (item.albumId && item.meta.picture) {
+        const hasCover = hasCoverStmt.get('album', item.albumId);
+        if (!hasCover) {
+          try {
+            await extractAndCacheEmbeddedArt(item.fullPath, item.albumId);
+          } catch {}
+        }
+      }
+    }
+
+    pendingMusicBatch.length = 0;
+  }
 
   for (const { fullPath, dir, filename } of audioFiles) {
     tracker?.notify(filename, lib, 'music');
@@ -920,155 +1156,51 @@ async function scanMusic(stats, musicRoot, lib, tracker) {
 
     const parsedFilename = parseTrackFilename(filename);
 
-    const artistName = folderArtist || meta.artist || 'فنان غير معروف';
-    const albumTitle = folderAlbum || meta.album || 'أغاني منفردة';
-    const trackTitle = meta.title || parsedFilename.title || path.basename(filename, path.extname(filename));
-    const trackNum = meta.trackNumber || parsedFilename.track || null;
-    const duration = meta.duration || null;
-    const yearMatch = albumTitle?.match(/\b(19\d\d|20\d\d)\b/);
-    const year = meta.year || (yearMatch ? parseInt(yearMatch[1], 10) : null);
-
-    try {
-      // 1. Check if track already exists in database
-      const existingTrack = db.prepare(`
-        SELECT t.id, t.album_id, a.artist_id 
-        FROM tracks t 
-        JOIN albums a ON t.album_id = a.id 
-        WHERE t.path = ?
-      `).get(fullPath);
-
-      const isNew = !existingTrack;
-      let artistId = null;
-      let albumId = null;
-
-      if (existingTrack) {
-        // Retain existing artist and album so renamed artists/albums are NOT duplicated!
-        artistId = existingTrack.artist_id;
-        albumId = existingTrack.album_id;
-      } else {
-        // New track: resolve artist carefully
-        // A. If folderArtist is present, check if other tracks from the same artist directory belong to an artist
-        if (folderArtist) {
-          const artistDir = path.join(musicRoot, folderArtist);
-          const matchDir = db.prepare(`
-            SELECT a.artist_id 
-            FROM tracks t 
-            JOIN albums a ON t.album_id = a.id 
-            WHERE t.path LIKE ? 
-            LIMIT 1
-          `).get(artistDir + '%');
-
-          if (matchDir) {
-            artistId = matchDir.artist_id;
-          }
-        }
-
-        // B. Check exact name in DB
-        if (!artistId) {
-          const exactArtist = getArtist.get(artistName);
-          if (exactArtist) artistId = exactArtist.id;
-        }
-
-        // C. Check normalized name (e.g. "AMR-DIAB" matches "AMR DIAB")
-        if (!artistId) {
-          const targetNorm = norm(artistName);
-          const found = cachedArtists.find(a => norm(a.name) === targetNorm);
-          if (found) artistId = found.id;
-        }
-
-        // D. Create new artist only if no match found
-        if (!artistId) {
-          insertArtist.run(artistName, libraryId);
-          const newArtist = getArtist.get(artistName);
-          if (newArtist) {
-            artistId = newArtist.id;
-            cachedArtists.push({ id: artistId, name: artistName });
-          }
-        }
-
-        if (!artistId) continue;
-
-        // Resolve album for new track
-        let albumRow = getAlbum.get(artistId, albumTitle);
-        if (!albumRow) {
-          // Check normalized album title for this artist
-          const targetAlbNorm = norm(albumTitle);
-          const existingAlbums = db.prepare('SELECT id, title FROM albums WHERE artist_id = ?').all(artistId);
-          albumRow = existingAlbums.find(a => norm(a.title) === targetAlbNorm);
-        }
-
-        if (!albumRow) {
-          try {
-            insertAlbum.run(artistId, albumTitle, year, libraryId);
-            albumRow = getAlbum.get(artistId, albumTitle);
-          } catch (e) {
-            stats.errors.push(`Album ${albumTitle} error: ${e.message}`);
-            continue;
-          }
-        }
-
-        if (!albumRow) continue;
-        albumId = albumRow.id;
+    const isExisting = db.prepare('SELECT id FROM tracks WHERE path = ?').get(fullPath);
+    if (!isExisting) {
+      stats.newItems++;
+      if (Array.isArray(stats.newItemsList)) {
+        stats.newItemsList.push({
+          type: 'track',
+          artist: folderArtist || meta.artist || 'فنان غير معروف',
+          album: folderAlbum || meta.album || 'أغاني منفردة',
+          title: meta.title || parsedFilename.title || path.basename(filename, path.extname(filename)),
+          filename,
+          fullPath,
+          libraryId: lib.id,
+          libraryName: lib.name
+        });
       }
+    }
 
-      // Update album year/library_id if year was extracted
-      if (year) {
-        db.prepare('UPDATE albums SET year = COALESCE(year, ?), library_id = COALESCE(library_id, ?) WHERE id = ?').run(year, libraryId, albumId);
-      } else {
-        db.prepare('UPDATE albums SET library_id = COALESCE(library_id, ?) WHERE id = ?').run(libraryId, albumId);
-      }
+    let extractedLyrics = null;
+    const lrcPath = fullPath.replace(/\.[^/.]+$/, '.lrc');
+    const txtPath = fullPath.replace(/\.[^/.]+$/, '.txt');
+    if (fs.existsSync(lrcPath)) {
+      try { extractedLyrics = fs.readFileSync(lrcPath, 'utf8'); } catch {}
+    } else if (fs.existsSync(txtPath)) {
+      try { extractedLyrics = fs.readFileSync(txtPath, 'utf8'); } catch {}
+    } else if (meta.lyrics) {
+      extractedLyrics = meta.lyrics;
+    }
 
-      let extractedLyrics = null;
-      const lrcPath = fullPath.replace(/\.[^/.]+$/, '.lrc');
-      const txtPath = fullPath.replace(/\.[^/.]+$/, '.txt');
-      if (fs.existsSync(lrcPath)) {
-        try { extractedLyrics = fs.readFileSync(lrcPath, 'utf8'); } catch {}
-      } else if (fs.existsSync(txtPath)) {
-        try { extractedLyrics = fs.readFileSync(txtPath, 'utf8'); } catch {}
-      } else if (meta.lyrics) {
-        extractedLyrics = meta.lyrics;
-      }
+    pendingMusicBatch.push({
+      fullPath,
+      dir,
+      filename,
+      folderArtist,
+      folderAlbum,
+      meta,
+      parsedFilename,
+      extractedLyrics
+    });
 
-      insertTrack.run(albumId, trackTitle, trackNum, duration, fullPath, libraryId, extractedLyrics);
-      stats.tracks++;
-
-      if (isNew) {
-        stats.newItems++;
-        if (Array.isArray(stats.newItemsList)) {
-          stats.newItemsList.push({
-            type: 'track',
-            artist: artistName,
-            album: albumTitle,
-            title: trackTitle,
-            filename,
-            fullPath,
-            libraryId: lib.id,
-            libraryName: lib.name
-          });
-        }
-      }
-
-      const trackRow = db.prepare('SELECT id FROM tracks WHERE path = ?').get(fullPath);
-      if (trackRow && meta.genres) {
-        assignTagsToMedia(meta.genres, 'track', trackRow.id);
-        assignTagsToMedia(meta.genres, 'album', albumId);
-        assignTagsToMedia(meta.genres, 'artist', artistId);
-      }
-
-      // Try embedded art if album has no cover
-      if (meta.picture) {
-        const hasCover = db.prepare('SELECT 1 FROM images WHERE media_type = ? AND media_id = ?').get('album', albumId);
-        if (!hasCover) {
-          try {
-            await extractAndCacheEmbeddedArt(fullPath, albumId);
-          } catch {}
-        }
-      }
-    } catch (e) {
-      console.error(`[Scanner] Error processing track "${filename}":`, e.message);
-      stats.errors.push(e.message);
+    if (pendingMusicBatch.length >= MUSIC_BATCH_SIZE) {
+      await flushMusicBatch();
     }
   }
+
+  await flushMusicBatch();
 
   // Clean up any empty albums or empty artists that have 0 tracks
   try {
@@ -1175,13 +1307,23 @@ export async function scanSingleSeries(seriesId, targetSeasonId = null) {
     errors: []
   };
 
-  // 3. Prune deleted files
+  // 3. Prune deleted files using transaction
+  const deletedEpIds = [];
   for (const ep of existingEpisodes) {
     if (targetSeasonId && ep.season_id !== targetSeasonId) continue;
     if (!fs.existsSync(ep.path)) {
-      db.prepare('DELETE FROM episodes WHERE id = ?').run(ep.id);
-      stats.deleted++;
+      deletedEpIds.push(ep.id);
     }
+  }
+  if (deletedEpIds.length > 0) {
+    const deleteBatch = db.transaction((ids) => {
+      const delStmt = db.prepare('DELETE FROM episodes WHERE id = ?');
+      for (const id of ids) {
+        delStmt.run(id);
+      }
+    });
+    deleteBatch(deletedEpIds);
+    stats.deleted += deletedEpIds.length;
   }
 
   // 4. Find all video files on disk
@@ -1245,6 +1387,32 @@ export async function scanSingleSeries(seriesId, targetSeasonId = null) {
     const hasAnyExplicit = explicitNumbers.size > 0;
     let nextAutoNumber = 1;
 
+    // Batch SQLite Transaction for single series episodes
+    const commitSingleSeriesEpisodes = db.transaction((batch) => {
+      for (const ep of batch) {
+        insertEpisode.run(ep.seasonId, ep.epNumber, ep.epTitle, ep.video.fullPath, ep.probe.duration, ep.probe.resolution);
+      }
+    });
+
+    const pendingSingleEpisodes = [];
+    const SINGLE_SERIES_BATCH_SIZE = 30;
+
+    function flushSingleEpisodesBatch() {
+      if (!pendingSingleEpisodes.length) return;
+      try {
+        commitSingleSeriesEpisodes(pendingSingleEpisodes);
+      } catch (batchErr) {
+        for (const ep of pendingSingleEpisodes) {
+          try {
+            commitSingleSeriesEpisodes([ep]);
+          } catch (e) {
+            stats.errors.push(e.message);
+          }
+        }
+      }
+      pendingSingleEpisodes.length = 0;
+    }
+
     for (let i = 0; i < sVideos.length; i++) {
       const video = sVideos[i];
       let epNumber;
@@ -1304,12 +1472,20 @@ export async function scanSingleSeries(seriesId, targetSeasonId = null) {
         } catch {}
       }
 
-      try {
-        insertEpisode.run(seasonId, epNumber, epTitle, video.fullPath, probe.duration, probe.resolution);
-      } catch (e) {
-        stats.errors.push(e.message);
+      pendingSingleEpisodes.push({
+        seasonId,
+        epNumber,
+        epTitle,
+        video,
+        probe
+      });
+
+      if (pendingSingleEpisodes.length >= SINGLE_SERIES_BATCH_SIZE) {
+        flushSingleEpisodesBatch();
       }
     }
+
+    flushSingleEpisodesBatch();
 
     // Attach season artwork if available
     try {

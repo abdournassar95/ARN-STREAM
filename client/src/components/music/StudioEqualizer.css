@@ -1,0 +1,464 @@
+/* --- Studio Equalizer Glassmorphism Styling --- */
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;600;800&display=swap');
+
+/* --- Dynamic Color Themes --- */
+.studio-eq-container {
+    --bg-color: #0d0f12;
+    --glass-bg: rgba(255, 255, 255, 0.03);
+    --glass-border: rgba(255, 255, 255, 0.08);
+    --text-main: #ffffff;
+    --text-sub: #8b92a5;
+    --accent-1: #00d2ff; /* Cyan */
+    --accent-2: #3a7bd5; /* Blue */
+    --glow: rgba(0, 210, 255, 0.4);
+    --track-bg: rgba(0, 0, 0, 0.4);
+    font-family: 'Cairo', 'Alexandria', sans-serif;
+    color: var(--text-main);
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* ثيم غروب */
+.studio-eq-container.theme-sunset {
+    --bg-color: #140f14;
+    --accent-1: #ff7e5f;
+    --accent-2: #feb47b;
+    --glow: rgba(255, 126, 95, 0.4);
+    --text-sub: #a58b8b;
+}
+
+/* ثيم غابة */
+.studio-eq-container.theme-forest {
+    --bg-color: #0a110f;
+    --accent-1: #11998e;
+    --accent-2: #38ef7d;
+    --glow: rgba(17, 153, 142, 0.4);
+    --text-sub: #8ba59b;
+}
+
+/* --- حاوية الزجاج الرئيسية --- */
+.studio-eq-container .glass-panel {
+    background: var(--glass-bg);
+    backdrop-filter: blur(25px);
+    -webkit-backdrop-filter: blur(25px);
+    border: 1px solid var(--glass-border);
+    border-radius: 30px;
+    padding: 35px 40px;
+    box-shadow: 
+        0 30px 60px rgba(0, 0, 0, 0.6),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 35px;
+    width: 100%;
+    max-width: 1150px;
+    position: relative;
+    transition: all 0.5s ease;
+    background-color: var(--bg-color);
+    background-image: 
+        radial-gradient(circle at 15% 50%, var(--glow) 0%, transparent 40%),
+        radial-gradient(circle at 85% 30%, var(--glow) 0%, transparent 40%);
+}
+
+/* أزرار تغيير الثيم */
+.studio-eq-container .theme-switcher {
+    position: absolute;
+    top: -42px;
+    right: 20px;
+    display: flex;
+    gap: 10px;
+    z-index: 20;
+}
+
+.studio-eq-container[dir="rtl"] .theme-switcher {
+    right: auto;
+    left: 20px;
+}
+
+.studio-eq-container .theme-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 2px solid var(--glass-border);
+    cursor: pointer;
+    transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+.studio-eq-container .theme-btn:hover { 
+    transform: scale(1.15); 
+    border-color: var(--text-main); 
+}
+.studio-eq-container .theme-btn.active { 
+    border-color: var(--text-main); 
+    transform: scale(1.15); 
+    box-shadow: 0 0 12px var(--glow); 
+}
+.studio-eq-container .theme-btn.default { background: linear-gradient(135deg, #00d2ff, #3a7bd5); }
+.studio-eq-container .theme-btn.sunset { background: linear-gradient(135deg, #ff7e5f, #feb47b); }
+.studio-eq-container .theme-btn.forest { background: linear-gradient(135deg, #11998e, #38ef7d); }
+
+/* زر الإغلاق الدائري الزجاجي */
+.studio-eq-container .close-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    color: var(--text-sub);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.studio-eq-container .close-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-main);
+    border-color: var(--accent-1);
+    transform: scale(1.05);
+}
+
+/* العنوان */
+.studio-eq-container .header {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    border-bottom: 1px solid var(--glass-border);
+    padding-bottom: 18px;
+    margin-bottom: 5px;
+}
+.studio-eq-container .header h1 {
+    font-size: 1.85rem;
+    font-weight: 800;
+    letter-spacing: 2px;
+    background: linear-gradient(90deg, var(--accent-1), var(--accent-2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    transition: all 0.5s ease;
+    margin: 0;
+    line-height: 1.2;
+}
+.studio-eq-container .header span {
+    font-size: 0.85rem;
+    color: var(--text-sub);
+    letter-spacing: 1px;
+}
+
+/* --- القسم الأيسر (المقابض) --- */
+.studio-eq-container .left-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+}
+
+/* المقبض الدائري */
+.studio-eq-container .knob-wrapper {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.studio-eq-container .knob-container {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+/* المقبض الكبير */
+.studio-eq-container .main-knob-container {
+    width: 210px;
+    height: 210px;
+}
+
+.studio-eq-container .knob-track {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    border: 2px solid var(--glass-border);
+    border-top-color: var(--accent-1);
+    transform: rotate(-45deg);
+    transition: border-color 0.5s ease;
+    pointer-events: none;
+}
+
+.studio-eq-container .knob {
+    width: 85%;
+    height: 85%;
+    border-radius: 50%;
+    background: linear-gradient(145deg, #1a1c21, #0d0f12);
+    box-shadow: 
+        10px 10px 20px rgba(0,0,0,0.6),
+        -5px -5px 15px rgba(255,255,255,0.02),
+        inset 2px 2px 5px rgba(255,255,255,0.1);
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: grab;
+    border: 1px solid var(--glass-border);
+    transition: transform 0.05s linear;
+    touch-action: none;
+}
+.studio-eq-container .knob:active { cursor: grabbing; }
+
+.studio-eq-container .knob-inner-dot {
+    width: 12px;
+    height: 12px;
+    background: var(--accent-1);
+    border-radius: 50%;
+    position: absolute;
+    top: 15px;
+    box-shadow: 0 0 15px var(--accent-1);
+    transition: background 0.5s, box-shadow 0.5s;
+}
+
+.studio-eq-container .knob-label {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-main);
+    margin-top: 15px;
+    text-align: center;
+    line-height: 1.4;
+}
+
+/* مقابض البيز والتربل */
+.studio-eq-container .small-knobs-row {
+    display: flex;
+    gap: 40px;
+    margin-top: 25px;
+}
+
+.studio-eq-container .small-knob-container {
+    width: 90px;
+    height: 90px;
+}
+
+.studio-eq-container .small-knob-container .knob-inner-dot {
+    width: 8px;
+    height: 8px;
+    top: 8px;
+}
+
+.studio-eq-container .small-knob-container .knob-label {
+    font-size: 0.85rem;
+    margin-top: 10px;
+}
+
+/* --- القسم الأيمن (الرسم البياني) --- */
+.studio-eq-container .right-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    justify-content: space-between;
+}
+
+/* شاشة Canvas */
+.studio-eq-container .visualizer-wrapper {
+    position: relative;
+    height: 130px;
+    width: 100%;
+    background: var(--track-bg);
+    border-radius: 20px;
+    border: 1px solid var(--glass-border);
+    overflow: hidden;
+    box-shadow: inset 0 10px 20px rgba(0,0,0,0.5);
+}
+
+.studio-eq-container canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* أزرار التحكم */
+.studio-eq-container .controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.studio-eq-container .btn {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    color: var(--text-main);
+    padding: 8px 20px;
+    border-radius: 14px;
+    font-family: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+    font-size: 0.85rem;
+}
+
+.studio-eq-container .btn:hover { 
+    background: rgba(255, 255, 255, 0.08); 
+    border-color: var(--accent-1); 
+}
+
+.studio-eq-container .btn.active {
+    background: var(--accent-1);
+    color: #000;
+    border-color: var(--accent-1);
+    box-shadow: 0 0 20px var(--glow);
+}
+
+/* شرائح البريستس (Presets Pills) */
+.studio-eq-container .preset-chip {
+    padding: 5px 12px;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    color: var(--text-sub);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.studio-eq-container .preset-chip:hover {
+    color: var(--text-main);
+    border-color: var(--accent-1);
+    background: rgba(255, 255, 255, 0.06);
+}
+.studio-eq-container .preset-chip.active {
+    background: var(--accent-1);
+    color: #000;
+    border-color: var(--accent-1);
+    box-shadow: 0 0 10px var(--glow);
+}
+
+/* --- الإيكولايزر (10 منزلقات) --- */
+.studio-eq-container .eq-sliders {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    height: 195px;
+    padding-top: 5px;
+    position: relative;
+    width: 100%;
+}
+
+.studio-eq-container .slider-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    height: 100%;
+    justify-content: flex-end;
+    position: relative;
+    flex: 1;
+    max-width: 55px;
+}
+
+.studio-eq-container .slider-track {
+    width: 6px;
+    height: 140px;
+    background: var(--track-bg);
+    border-radius: 3px;
+    position: relative;
+    box-shadow: inset 0 2px 5px rgba(0,0,0,0.8);
+    border: 1px solid var(--glass-border);
+    margin-bottom: 12px;
+    cursor: pointer;
+    touch-action: none;
+}
+
+.studio-eq-container .slider-fill {
+    position: absolute;
+    bottom: 0;
+    width: 100%;
+    background: linear-gradient(to top, var(--accent-2), var(--accent-1));
+    border-radius: 3px;
+    opacity: 0.85;
+    box-shadow: 0 0 10px var(--glow);
+    transition: height 0.04s ease-out;
+    pointer-events: none;
+}
+
+.studio-eq-container .slider-thumb {
+    position: absolute;
+    width: 26px;
+    height: 14px;
+    background: #fff;
+    border-radius: 4px;
+    left: 50%;
+    transform: translateX(-50%);
+    cursor: grab;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10;
+    touch-action: none;
+}
+
+.studio-eq-container .slider-thumb:active { 
+    cursor: grabbing; 
+    transform: translateX(-50%) scale(1.1); 
+    box-shadow: 0 0 12px var(--glow);
+}
+
+.studio-eq-container .thumb-line {
+    width: 60%;
+    height: 2px;
+    background: #333;
+    border-radius: 1px;
+}
+
+.studio-eq-container .freq-label {
+    color: var(--text-sub);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    margin-top: 3px;
+    text-align: center;
+}
+
+.studio-eq-container .slider-tooltip {
+    position: absolute;
+    top: -26px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(15, 23, 42, 0.95);
+    border: 1px solid var(--accent-1);
+    color: var(--accent-1);
+    font-size: 0.65rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: bold;
+    padding: 2px 5px;
+    border-radius: 4px;
+    white-space: nowrap;
+    pointer-events: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    z-index: 20;
+}
+
+/* Responsiveness */
+@media (max-width: 960px) {
+    .studio-eq-container .glass-panel {
+        grid-template-columns: 1fr;
+        padding: 24px;
+        gap: 25px;
+    }
+    .studio-eq-container .left-panel {
+        order: 2;
+        padding: 0;
+    }
+    .studio-eq-container .right-panel {
+        order: 1;
+    }
+    .studio-eq-container .theme-switcher {
+        position: static;
+        margin-bottom: 10px;
+    }
+}
+

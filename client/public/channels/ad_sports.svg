@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="adBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#041224"/>
+      <stop offset="45%" stop-color="#082348"/>
+      <stop offset="85%" stop-color="#020c1a"/>
+      <stop offset="100%" stop-color="#01060e"/>
+    </linearGradient>
+    <radialGradient id="adGlow" cx="50%" cy="30%" r="65%">
+      <stop offset="0%" stop-color="#0284c7" stop-opacity="0.45"/>
+      <stop offset="50%" stop-color="#38bdf8" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="adBlue" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="50%" stop-color="#0284c7"/>
+      <stop offset="100%" stop-color="#0369a1"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.7"/>
+    </filter>
+  </defs>
+
+  <!-- Background Base -->
+  <rect width="300" height="420" rx="20" fill="url(#adBg)"/>
+  <rect width="300" height="420" rx="20" fill="url(#adGlow)"/>
+
+  <!-- Dynamic Stadium Light Lines -->
+  <path d="M -20 180 L 320 60" stroke="#38bdf8" stroke-width="2" stroke-opacity="0.25"/>
+  <circle cx="150" cy="205" r="125" fill="none" stroke="#38bdf8" stroke-width="1.2" stroke-opacity="0.18" stroke-dasharray="6 6"/>
+  <circle cx="150" cy="205" r="90" fill="none" stroke="#ffffff" stroke-width="1" stroke-opacity="0.12"/>
+
+  <!-- Top Badges -->
+  <g transform="translate(18, 22)">
+    <rect width="68" height="24" rx="12" fill="#ef4444" filter="url(#shadow)"/>
+    <circle cx="14" cy="12" r="4" fill="#ffffff"/>
+    <text x="36" y="16" fill="#ffffff" font-family="'Cairo', 'Inter', sans-serif" font-weight="900" font-size="11" letter-spacing="1">LIVE</text>
+  </g>
+
+  <g transform="translate(216, 22)">
+    <rect width="66" height="24" rx="6" fill="#000000" fill-opacity="0.65" stroke="#38bdf8" stroke-opacity="0.5" stroke-width="1"/>
+    <text x="33" y="16" fill="#38bdf8" font-family="'Inter', sans-serif" font-weight="900" font-size="11" text-anchor="middle">FHD 1080</text>
+  </g>
+
+  <!-- Center AD Sports Branding -->
+  <g transform="translate(150, 205)" filter="url(#shadow)" text-anchor="middle">
+    <!-- Glowing background plate -->
+    <rect x="-115" y="-76" width="230" height="152" rx="20" fill="#031326" fill-opacity="0.9" stroke="#38bdf8" stroke-opacity="0.4" stroke-width="1.5"/>
+
+    <!-- AD Typography -->
+    <text x="0" y="-8" fill="#ffffff" font-family="'Arial Black', 'Impact', sans-serif" font-weight="900" font-size="38" letter-spacing="2">
+      AD <tspan fill="#38bdf8">SPORTS</tspan>
+    </text>
+
+    <!-- 1 HD Blue Badge -->
+    <g transform="translate(0, 8)">
+      <rect x="-55" y="0" width="110" height="24" rx="12" fill="url(#adBlue)"/>
+      <text x="0" y="17" fill="#ffffff" font-family="'Cairo', 'Inter', sans-serif" font-weight="900" font-size="13" letter-spacing="1">
+        أبوظبي 1 HD
+      </text>
+    </g>
+
+    <!-- Subtitle: Coppa Italia & Global Sports -->
+    <g transform="translate(0, 44)">
+      <rect x="-65" y="0" width="130" height="18" rx="9" fill="#000000" fill-opacity="0.6" stroke="#38bdf8" stroke-opacity="0.3" stroke-width="1"/>
+      <text x="0" y="13" fill="#bae6fd" font-family="'Cairo', sans-serif" font-weight="800" font-size="10" letter-spacing="0.5">
+        كأس إيطاليا والبطولات العالمية
+      </text>
+    </g>
+  </g>
+
+  <!-- Bottom Details -->
+  <g transform="translate(20, 358)">
+    <text x="0" y="14" fill="#ffffff" font-family="'Cairo', sans-serif" font-weight="800" font-size="16">أقوى الكؤوس والبطولات</text>
+    <text x="0" y="32" fill="#bae6fd" font-family="'Cairo', sans-serif" font-weight="600" font-size="12">تغطية رياضية احترافية واستوديوهات حية</text>
+  </g>
+
+  <!-- Subtle Border Rim -->
+  <rect width="298" height="418" x="1" y="1" rx="19" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-opacity="0.15"/>
+</svg>

@@ -74,7 +74,9 @@ router.get('/:id', (req, res) => {
   if (lib.type === 'movies') {
     let sql = `
       SELECT movies.*, 
-        (SELECT rating FROM ratings WHERE media_type = 'movie' AND media_id = movies.id) as rating
+        (SELECT rating FROM ratings WHERE media_type = 'movie' AND media_id = movies.id) as rating,
+        (SELECT id FROM images WHERE media_type = 'movie' AND media_id = movies.id AND image_type = 'poster' AND is_primary = 1 LIMIT 1) as _posterId,
+        (SELECT id FROM images WHERE media_type = 'movie' AND media_id = movies.id AND image_type = 'backdrop' AND is_primary = 1 LIMIT 1) as _backdropId
       FROM movies
       WHERE library_id = ?
     `;
@@ -90,21 +92,20 @@ router.get('/:id', (req, res) => {
     params.push(Number(limit), Number(offset));
 
     const rows = db.prepare(sql).all(...params);
-    items = rows.map(m => {
-      const poster = db.prepare(`SELECT id FROM images WHERE media_type = 'movie' AND media_id = ? AND image_type = 'poster' AND is_primary = 1`).get(m.id);
-      const backdrop = db.prepare(`SELECT id FROM images WHERE media_type = 'movie' AND media_id = ? AND image_type = 'backdrop' AND is_primary = 1`).get(m.id);
-      return {
-        ...m,
-        poster: poster ? `/api/image/${poster.id}/thumb` : null,
-        backdrop: backdrop ? `/api/image/${backdrop.id}/full` : null
-      };
-    });
+    // صور مدمجة في نفس الاستعلام (إلغاء N+1)
+    items = rows.map(({ _posterId, _backdropId, ...m }) => ({
+      ...m,
+      poster: _posterId ? `/api/image/${_posterId}/thumb` : null,
+      backdrop: _backdropId ? `/api/image/${_backdropId}/full` : null
+    }));
   } else if (lib.type === 'shows') {
     let sql = `
       SELECT series.*,
         (SELECT rating FROM ratings WHERE media_type = 'series' AND media_id = series.id) as rating,
         (SELECT COUNT(*) FROM seasons WHERE series_id = series.id) as seasonsCount,
-        (SELECT COUNT(*) FROM episodes JOIN seasons ON seasons.id = episodes.season_id WHERE seasons.series_id = series.id) as episodesCount
+        (SELECT COUNT(*) FROM episodes JOIN seasons ON seasons.id = episodes.season_id WHERE seasons.series_id = series.id) as episodesCount,
+        (SELECT id FROM images WHERE media_type = 'series' AND media_id = series.id AND image_type = 'poster' AND is_primary = 1 LIMIT 1) as _posterId,
+        (SELECT id FROM images WHERE media_type = 'series' AND media_id = series.id AND image_type = 'backdrop' AND is_primary = 1 LIMIT 1) as _backdropId
       FROM series
       WHERE library_id = ?
         AND EXISTS (SELECT 1 FROM seasons JOIN episodes ON episodes.season_id = seasons.id WHERE seasons.series_id = series.id)
@@ -121,21 +122,18 @@ router.get('/:id', (req, res) => {
     params.push(Number(limit), Number(offset));
 
     const rows = db.prepare(sql).all(...params);
-    items = rows.map(s => {
-      const poster = db.prepare(`SELECT id FROM images WHERE media_type = 'series' AND media_id = ? AND image_type = 'poster' AND is_primary = 1`).get(s.id);
-      const backdrop = db.prepare(`SELECT id FROM images WHERE media_type = 'series' AND media_id = ? AND image_type = 'backdrop' AND is_primary = 1`).get(s.id);
-      return {
-        ...s,
-        poster: poster ? `/api/image/${poster.id}/thumb` : null,
-        backdrop: backdrop ? `/api/image/${backdrop.id}/full` : null
-      };
-    });
+    items = rows.map(({ _posterId, _backdropId, ...s }) => ({
+      ...s,
+      poster: _posterId ? `/api/image/${_posterId}/thumb` : null,
+      backdrop: _backdropId ? `/api/image/${_backdropId}/full` : null
+    }));
   } else if (lib.type === 'music') {
     const view = req.query.view || 'artists';
     if (view === 'albums') {
       let sql = `
         SELECT albums.*, artists.name as artistName,
-          (SELECT COUNT(*) FROM tracks WHERE album_id = albums.id) as tracksCount
+          (SELECT COUNT(*) FROM tracks WHERE album_id = albums.id) as tracksCount,
+          (SELECT id FROM images WHERE media_type = 'album' AND media_id = albums.id AND image_type = 'album_cover' AND is_primary = 1 LIMIT 1) as _coverId
         FROM albums
         JOIN artists ON artists.id = albums.artist_id
         WHERE albums.library_id = ?
@@ -150,14 +148,11 @@ router.get('/:id', (req, res) => {
       params.push(Number(limit), Number(offset));
 
       const rows = db.prepare(sql).all(...params);
-      items = rows.map(al => {
-        const img = db.prepare(`SELECT id FROM images WHERE media_type = 'album' AND media_id = ? AND image_type = 'album_cover' AND is_primary = 1`).get(al.id);
-        return {
-          ...al,
-          item_type: 'album',
-          cover: img ? `/api/image/${img.id}/thumb` : null
-        };
-      });
+      items = rows.map(({ _coverId, ...al }) => ({
+        ...al,
+        item_type: 'album',
+        cover: _coverId ? `/api/image/${_coverId}/thumb` : null
+      }));
     } else if (view === 'tracks') {
       let sql = `
         SELECT tracks.*, albums.title as albumTitle, artists.name as artistName, artists.id as artistId
@@ -176,13 +171,20 @@ router.get('/:id', (req, res) => {
       params.push(Number(limit), Number(offset));
 
       const rows = db.prepare(sql).all(...params);
+      // غلاف واحد لكل ألبوم بدلاً من استعلام لكل مقطع
+      const albumIds = [...new Set(rows.map(r => r.album_id).filter(Boolean))];
+      const coverByAlbum = new Map();
+      if (albumIds.length) {
+        const covers = db.prepare(`SELECT media_id, id FROM images WHERE media_type = 'album' AND image_type = 'album_cover' AND is_primary = 1 AND media_id IN (SELECT value FROM json_each(?))`).all(JSON.stringify(albumIds));
+        for (const c of covers) if (!coverByAlbum.has(c.media_id)) coverByAlbum.set(c.media_id, c.id);
+      }
       items = rows.map(t => {
-        const img = db.prepare(`SELECT id FROM images WHERE media_type = 'album' AND media_id = ? AND image_type = 'album_cover' AND is_primary = 1`).get(t.album_id);
+        const coverId = coverByAlbum.get(t.album_id);
         return {
           ...t,
           item_type: 'track',
           url: `/api/stream/track/${t.id}`,
-          cover: img ? `/api/image/${img.id}/thumb` : null
+          cover: coverId ? `/api/image/${coverId}/thumb` : null
         };
       });
     } else {
@@ -190,7 +192,11 @@ router.get('/:id', (req, res) => {
       let sql = `
         SELECT artists.*,
           (SELECT COUNT(*) FROM albums WHERE artist_id = artists.id AND albums.library_id = ?) as albumsCount,
-          (SELECT COUNT(*) FROM tracks JOIN albums ON albums.id = tracks.album_id WHERE albums.artist_id = artists.id AND tracks.library_id = ?) as tracksCount
+          (SELECT COUNT(*) FROM tracks JOIN albums ON albums.id = tracks.album_id WHERE albums.artist_id = artists.id AND tracks.library_id = ?) as tracksCount,
+          (SELECT id FROM images WHERE media_type = 'artist' AND media_id = artists.id AND (image_type = 'poster' OR image_type = 'avatar') ORDER BY is_primary DESC, id DESC LIMIT 1) as _artistImgId,
+          (SELECT images.id FROM images JOIN albums ON albums.id = images.media_id AND images.media_type = 'album'
+             WHERE albums.artist_id = artists.id AND images.image_type = 'album_cover'
+             ORDER BY images.is_primary DESC, COALESCE(albums.year, 0) DESC, albums.id DESC LIMIT 1) as _fallbackImgId
         FROM artists
         WHERE artists.library_id = ?
       `;
@@ -204,23 +210,9 @@ router.get('/:id', (req, res) => {
       params.push(Number(limit), Number(offset));
 
       const rows = db.prepare(sql).all(...params);
-      items = rows.map(a => {
+      items = rows.map(({ _artistImgId, _fallbackImgId, ...a }) => {
         // Strictly select poster or avatar for artist thumbnail; never select wide backdrops
-        const artistImg = db.prepare(`
-          SELECT id FROM images 
-          WHERE media_type = 'artist' AND media_id = ? AND (image_type = 'poster' OR image_type = 'avatar') AND is_primary = 1
-        `).get(a.id) || db.prepare(`
-          SELECT id FROM images 
-          WHERE media_type = 'artist' AND media_id = ? AND (image_type = 'poster' OR image_type = 'avatar')
-          ORDER BY is_primary DESC, id DESC LIMIT 1
-        `).get(a.id);
-        const fallback = db.prepare(`
-          SELECT images.id FROM images 
-          JOIN albums ON albums.id = images.media_id AND images.media_type = 'album' 
-          WHERE albums.artist_id = ? AND images.image_type = 'album_cover' 
-          ORDER BY images.is_primary DESC, COALESCE(albums.year, 0) DESC, albums.id DESC LIMIT 1
-        `).get(a.id);
-        const imgId = artistImg?.id || fallback?.id || null;
+        const imgId = _artistImgId || _fallbackImgId || null;
         return {
           ...a,
           item_type: 'artist',

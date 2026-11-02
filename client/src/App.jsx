@@ -16,6 +16,8 @@ import FullRemoteControlModal from './components/shared/FullRemoteControlModal.j
 import MiniPlayer from './components/music/MiniPlayer.jsx';
 import SplashScreen from './components/shared/SplashScreen.jsx';
 import PWAInstallPrompt from './components/shared/PWAInstallPrompt.jsx';
+import ActivationModal from './components/shared/ActivationModal.jsx';
+import CommandPalette from './components/shared/CommandPalette.jsx';
 import { syncAuthCookie } from './api/client.js';
 
 syncAuthCookie();
@@ -43,7 +45,7 @@ const lazyRetry = (componentImport) =>
     }
   });
 
-const Landing = lazyRetry(() => import('./pages/Landing.jsx'));
+import Landing from './pages/Landing.jsx';
 const Login = lazyRetry(() => import('./pages/Login.jsx'));
 const MoviesHome = lazyRetry(() => import('./pages/movies/Home.jsx'));
 const Library = lazyRetry(() => import('./pages/Library.jsx'));
@@ -132,7 +134,7 @@ function SearchWrapper() {
 function AnimatedRoutes() {
   const location = useLocation();
   return (
-    <div key={location.pathname} className="page-transition min-h-screen">
+    <div key={location.pathname.startsWith('/watch') ? '/watch' : location.pathname} className="page-transition min-h-screen">
       <Routes location={location}>
         <Route path="/login" element={<Login />} />
         
@@ -166,7 +168,7 @@ function AnimatedRoutes() {
 
 export default function App() {
   const { i18n } = useTranslation();
-  const { theme } = useSettingsStore();
+  const { theme, performanceMode } = useSettingsStore();
   const { checkAuth } = useAuthStore();
   const currentTrack = usePlayerStore(s => s.currentTrack);
   
@@ -193,6 +195,15 @@ export default function App() {
     }
   }, [theme]);
 
+  useEffect(() => {
+    const root = document.documentElement;
+    if (performanceMode === 'turbo') {
+      root.classList.add('perf-turbo');
+    } else {
+      root.classList.remove('perf-turbo');
+    }
+  }, [performanceMode]);
+
   return (
     <QueryClientProvider client={qc}>
       <BrowserRouter>
@@ -209,8 +220,10 @@ export default function App() {
           <DeviceHandoffModal />
           <RemoteControlBanner />
           <FullRemoteControlModal />
+          <CommandPalette />
           <SplashScreen />
           <PWAInstallPrompt />
+          <ActivationModal />
         </ErrorBoundary>
       </BrowserRouter>
     </QueryClientProvider>

@@ -12,29 +12,36 @@ export const ffprobePath = ffprobeInstaller.path;
 let cachedHwAccel = null;
 
 export async function detectHwAccel() {
-  if (cachedHwAccel !== undefined && cachedHwAccel !== null) return cachedHwAccel;
+  if (cachedHwAccel !== null) {
+    return cachedHwAccel === false ? null : cachedHwAccel;
+  }
+
   try {
-    const { stdout } = await execFileAsync(ffmpegPath, ['-hide_banner', '-hwaccels']);
-    const methods = stdout.split('\n').map(l => l.trim());
-    if (methods.includes('cuda')) {
-      cachedHwAccel = { method: 'cuda', encoder: 'h264_nvenc', extraArgs: ['-preset', 'p4', '-rc', 'vbr', '-cq', '23'] };
-    } else if (methods.includes('qsv')) {
-      cachedHwAccel = { method: 'qsv', encoder: 'h264_qsv', extraArgs: ['-preset', 'faster', '-global_quality', '23'] };
-    } else if (methods.includes('d3d11va')) {
-      cachedHwAccel = null;
-    } else if (methods.includes('dxva2')) {
-      cachedHwAccel = null;
-    } else {
-      cachedHwAccel = null;
-    }
-  } catch (err) {
-    cachedHwAccel = null;
+    // Verify that NVIDIA NVENC hardware encoding actually works on this machine
+    await execFileAsync(ffmpegPath, [
+      '-hide_banner',
+      '-loglevel', 'error',
+      '-f', 'lavfi',
+      '-i', 'nullsrc=s=256x256:d=0.1',
+      '-frames:v', '1',
+      '-c:v', 'h264_nvenc',
+      '-preset', 'fast',
+      '-f', 'null',
+      '-'
+    ], { timeout: 4000, windowsHide: true });
+
+    cachedHwAccel = {
+      method: 'cuda',
+      encoder: 'h264_nvenc',
+      extraArgs: ['-preset', 'fast', '-b:v', '4M']
+    };
+    return cachedHwAccel;
+  } catch {
+    // NVENC not available or incompatible with bundled FFmpeg
   }
-  if (cachedHwAccel === null) {
-      // to avoid re-checking on failure, though the instruction says null. We'll cache null by checking if we have checked.
-      cachedHwAccel = false; // use false for "checked, not available"
-  }
-  return cachedHwAccel === false ? null : cachedHwAccel;
+
+  cachedHwAccel = false;
+  return null;
 }
 
 export const LANGUAGE_NAMES = {
@@ -99,10 +106,12 @@ export async function probeMedia(filePath) {
       '-show_streams',
       '-show_chapters',
       filePath
-    ], { timeout: 10000 });
+    ], { timeout: 10000, windowsHide: true });
 
     const data = JSON.parse(stdout);
-    const videoStream = data.streams?.find(s => s.codec_type === 'video');
+    const videoStream = data.streams?.find(
+      s => s.codec_type === 'video' && s.disposition?.attached_pic !== 1 && s.codec_name !== 'mjpeg' && s.codec_name !== 'png'
+    ) || data.streams?.find(s => s.codec_type === 'video');
     const audioStream = data.streams?.find(s => s.codec_type === 'audio');
 
     let duration = data.format?.duration ? Math.round(parseFloat(data.format.duration)) : null;
@@ -302,7 +311,13 @@ export async function streamWithFFmpeg(filePath, strategy, startTime = 0, req, r
     args.push('-ss', String(startTime));
   }
 
-  args.push('-i', filePath);
+  args.push(
+    '-i', filePath,
+    '-map', '0:v:0',
+    '-map', '0:a:0?',
+    '-sn',
+    '-dn'
+  );
 
   if (strategy.mode === 'remux') {
     // Copy video stream without re-encoding (0% CPU)
@@ -316,6 +331,9 @@ export async function streamWithFFmpeg(filePath, strategy, startTime = 0, req, r
       args.push('-c:a', 'aac', '-b:a', '192k', '-ac', '2');
     }
   } else {
+    // Ensure even dimensions required by H.264 yuv420p encoders
+    args.push('-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2');
+
     // Full transcode to 8-bit H.264 yuv420p
     if (hwAccel) {
       args.push(

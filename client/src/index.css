@@ -83,12 +83,46 @@ body {
   font-family: 'Alexandria', 'Cairo', sans-serif !important;
 }
 
+/* Prevent Arabic glyph descenders (ق، ي، ر، و، ن، ع، غ، ج، ح، خ، ص، ض) and tall hamzas (أ، إ، آ)
+   from being sliced off by Tailwind's tight line-height (e.g., text-5xl line-height: 1) + overflow: hidden */
+[dir="rtl"] h1,
+[dir="rtl"] h2,
+[dir="rtl"] h3,
+[dir="rtl"] h4 {
+  line-height: 1.4 !important;
+}
+
+[dir="rtl"] .truncate,
+[dir="rtl"] .line-clamp-1,
+[dir="rtl"] .line-clamp-2,
+[dir="rtl"] .line-clamp-3 {
+  line-height: 1.5 !important;
+  padding-top: 0.08em;
+  padding-bottom: 0.14em;
+}
+
 /* Utility */
 .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
-/* Range slider */
-input[type="range"] { -webkit-appearance: none; appearance: none; height: 4px; background: #2A2A2A; border-radius: 999px; }
+/* Range slider - ALWAYS Left-to-Right (min on left, max on right)
+   Fixes RTL slider reversal where volume, color adjustments, audio FX, and progress
+   appear inverted in Arabic. */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: #2A2A2A;
+  border-radius: 999px;
+  direction: ltr !important;
+}
 input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: #fff; cursor: pointer; }
+
+/* Force LTR direction on all range sliders across RTL document modes */
+[dir="rtl"] input[type="range"],
+html[dir="rtl"] input[type="range"],
+body[dir="rtl"] input[type="range"] {
+  direction: ltr !important;
+}
 
 /* Animations */
 @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
@@ -161,105 +195,106 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 12p
 .scrollbar-none { scrollbar-width: none; -ms-overflow-style: none; }
 .scrollbar-none::-webkit-scrollbar { display: none; }
 
-/* ── Dashboard Theme Variables ── */
+/* ── Dashboard Theme Variables (Studio Pro Dark Glassmorphism) ── */
 :root {
-  --dash-bg-deep: #060911;
-  --dash-bg-mid: #0a0f1e;
-  --dash-bg-end: #040608;
-  --dash-card-bg: linear-gradient(135deg, rgba(6,182,212,0.04) 0%, rgba(15,23,42,0.6) 100%);
-  --dash-card-border: rgba(6,182,212,0.10);
-  --dash-card-hover-border: rgba(6,182,212,0.30);
-  --dash-card-hover-shadow: 0 12px 32px -6px rgba(0,0,0,0.55), 0 0 24px rgba(6,182,212,0.12), inset 0 1px 0 rgba(6,182,212,0.18);
-  --dash-glow: linear-gradient(90deg, transparent, rgba(6,182,212,0.3), transparent);
-  --dash-card-title-color: rgba(148,163,184,0.9);
-  --dash-sidebar-bg: rgba(10,15,30,0.8);
-  --dash-sidebar-border: rgba(6,182,212,0.10);
-  --dash-input-bg: #0c1324;
-  --dash-input-border: rgba(6,182,212,0.15);
-  --dash-input-focus-border: rgba(6,182,212,0.40);
-  --dash-input-text: #e2e8f0;
-  --dash-heading-text: #e2e8f0;
+  --dash-bg-deep: #0b0f19;
+  --dash-bg-mid: #0d121f;
+  --dash-bg-end: #080b12;
+  --dash-card-bg: rgba(255, 255, 255, 0.03);
+  --dash-card-border: rgba(255, 255, 255, 0.08);
+  --dash-card-hover-border: rgba(0, 210, 255, 0.35);
+  --dash-card-hover-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 210, 255, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  --dash-glow: linear-gradient(90deg, transparent, rgba(0, 210, 255, 0.3), transparent);
+  --dash-card-title-color: #8b92a5;
+  --dash-sidebar-bg: rgba(13, 15, 18, 0.75);
+  --dash-sidebar-border: rgba(255, 255, 255, 0.08);
+  --dash-input-bg: rgba(0, 0, 0, 0.45);
+  --dash-input-border: rgba(255, 255, 255, 0.10);
+  --dash-input-focus-border: #00d2ff;
+  --dash-input-text: #ffffff;
+  --dash-heading-text: #ffffff;
   --dash-body-text: #cbd5e1;
-  --dash-muted-text: #64748b;
-  --dash-table-header-bg: rgba(10,15,30,0.6);
-  --dash-row-hover: rgba(6,182,212,0.03);
-  --dash-dot-color: rgba(6,182,212,0.8);
-  --dash-vignette: radial-gradient(ellipse_at_center,transparent_40%,rgba(2,4,8,0.85)_100%);
-  --dash-orb-cyan: rgba(6,182,212,0.12);
-  --dash-orb-blue: rgba(59,130,246,0.08);
-  --dash-orb-green: rgba(16,185,129,0.06);
-  --dash-orb-indigo: rgba(99,102,241,0.05);
-  --dash-modal-bg: #0c1324;
-  --dash-select-dropdown-bg: #0c1324;
-  --dash-scrollbar-track: rgba(6, 9, 17, 0.6);
-  --dash-scrollbar-thumb: rgba(6, 182, 212, 0.2);
-  --dash-scrollbar-thumb-hover: rgba(6, 182, 212, 0.4);
+  --dash-muted-text: #8b92a5;
+  --dash-table-header-bg: rgba(0, 0, 0, 0.3);
+  --dash-row-hover: rgba(0, 210, 255, 0.04);
+  --dash-dot-color: rgba(0, 210, 255, 0.3);
+  --dash-vignette: radial-gradient(ellipse at center, transparent 40%, rgba(11, 15, 25, 0.8) 100%);
+  --dash-orb-cyan: rgba(0, 210, 255, 0.06);
+  --dash-orb-blue: rgba(58, 123, 213, 0.05);
+  --dash-orb-green: rgba(16, 185, 129, 0.03);
+  --dash-orb-indigo: rgba(58, 123, 213, 0.03);
+  --dash-modal-bg: #0d121f;
+  --dash-select-dropdown-bg: #0d121f;
+  --dash-scrollbar-track: rgba(11, 15, 25, 0.5);
+  --dash-scrollbar-thumb: rgba(255, 255, 255, 0.15);
+  --dash-scrollbar-thumb-hover: rgba(0, 210, 255, 0.4);
   --dash-gauge-text: #ffffff;
-  --dash-badge-bg: rgba(6,182,212,0.20);
+  --dash-badge-bg: rgba(0, 210, 255, 0.15);
 }
 
 html.light {
-  --dash-bg-deep: #e8ecf4;
-  --dash-bg-mid: #f1f3f8;
-  --dash-bg-end: #e4e8f0;
-  --dash-card-bg: linear-gradient(135deg, rgba(6,182,212,0.05) 0%, rgba(255,255,255,0.85) 100%);
-  --dash-card-border: rgba(6,182,212,0.15);
-  --dash-card-hover-border: rgba(6,182,212,0.35);
-  --dash-card-hover-shadow: 0 12px 28px -6px rgba(0,0,0,0.09), 0 4px 18px rgba(6,182,212,0.12), inset 0 1px 0 rgba(6,182,212,0.22);
-  --dash-glow: linear-gradient(90deg, transparent, rgba(6,182,212,0.25), transparent);
-  --dash-card-title-color: rgba(51,65,85,0.9);
-  --dash-sidebar-bg: rgba(255,255,255,0.85);
-  --dash-sidebar-border: rgba(6,182,212,0.12);
-  --dash-input-bg: #f1f5f9;
-  --dash-input-border: rgba(6,182,212,0.20);
-  --dash-input-focus-border: rgba(6,182,212,0.50);
-  --dash-input-text: #1e293b;
-  --dash-heading-text: #1e293b;
+  --dash-bg-deep: #f1f5f9;
+  --dash-bg-mid: #f8fafc;
+  --dash-bg-end: #e2e8f0;
+  --dash-card-bg: rgba(255, 255, 255, 0.85);
+  --dash-card-border: rgba(0, 0, 0, 0.08);
+  --dash-card-hover-border: rgba(0, 210, 255, 0.4);
+  --dash-card-hover-shadow: 0 16px 36px -6px rgba(0, 0, 0, 0.08), 0 0 16px rgba(0, 210, 255, 0.1);
+  --dash-glow: linear-gradient(90deg, transparent, rgba(0, 210, 255, 0.2), transparent);
+  --dash-card-title-color: #64748b;
+  --dash-sidebar-bg: rgba(255, 255, 255, 0.9);
+  --dash-sidebar-border: rgba(0, 0, 0, 0.08);
+  --dash-input-bg: #f8fafc;
+  --dash-input-border: rgba(0, 0, 0, 0.12);
+  --dash-input-focus-border: #00d2ff;
+  --dash-input-text: #0f172a;
+  --dash-heading-text: #0f172a;
   --dash-body-text: #334155;
   --dash-muted-text: #64748b;
-  --dash-table-header-bg: rgba(241,245,249,0.8);
-  --dash-row-hover: rgba(6,182,212,0.05);
-  --dash-dot-color: rgba(6,182,212,0.3);
-  --dash-vignette: radial-gradient(ellipse_at_center,transparent_60%,rgba(226,232,240,0.5)_100%);
-  --dash-orb-cyan: rgba(6,182,212,0.06);
-  --dash-orb-blue: rgba(59,130,246,0.04);
-  --dash-orb-green: rgba(16,185,129,0.03);
-  --dash-orb-indigo: rgba(99,102,241,0.03);
+  --dash-table-header-bg: rgba(241, 245, 249, 0.8);
+  --dash-row-hover: rgba(0, 210, 255, 0.04);
+  --dash-dot-color: rgba(0, 210, 255, 0.2);
+  --dash-vignette: radial-gradient(ellipse at center, transparent 60%, rgba(226, 232, 240, 0.4) 100%);
+  --dash-orb-cyan: rgba(0, 210, 255, 0.04);
+  --dash-orb-blue: rgba(58, 123, 213, 0.03);
+  --dash-orb-green: rgba(16, 185, 129, 0.02);
+  --dash-orb-indigo: rgba(58, 123, 213, 0.02);
   --dash-modal-bg: #ffffff;
   --dash-select-dropdown-bg: #ffffff;
-  --dash-scrollbar-track: rgba(226, 232, 240, 0.6);
-  --dash-scrollbar-thumb: rgba(6, 182, 212, 0.25);
-  --dash-scrollbar-thumb-hover: rgba(6, 182, 212, 0.45);
-  --dash-gauge-text: #1e293b;
-  --dash-badge-bg: rgba(6,182,212,0.12);
+  --dash-scrollbar-track: rgba(241, 245, 249, 0.6);
+  --dash-scrollbar-thumb: rgba(0, 0, 0, 0.15);
+  --dash-scrollbar-thumb-hover: rgba(0, 210, 255, 0.4);
+  --dash-gauge-text: #0f172a;
+  --dash-badge-bg: rgba(0, 210, 255, 0.12);
 }
 
-/* ── Dashboard Futuristic Cards ── */
+/* ── Dashboard Futuristic Glass Cards ── */
 .dash-card {
   position: relative;
-  border-radius: 20px;
+  border-radius: 24px;
   overflow: hidden;
   background: var(--dash-card-bg);
   border: 1px solid var(--dash-card-border);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  transition-property: transform, border-color, box-shadow, background-color;
-  transition-duration: 160ms;
+  backdrop-filter: blur(25px);
+  -webkit-backdrop-filter: blur(25px);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition-property: transform, border-color, box-shadow;
+  transition-duration: 220ms;
   transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
   will-change: transform;
 }
 .dash-card:hover {
-  transform: translateY(-2px);
+  transform: translateY(-3px);
   border-color: var(--dash-card-hover-border);
   box-shadow: var(--dash-card-hover-shadow);
 }
-/* Glow line at top of card */
+/* Subtle top highlight line */
 .dash-card::before {
   content: '';
   position: absolute;
   top: 0;
-  left: 10%;
-  right: 10%;
+  left: 15%;
+  right: 15%;
   height: 1px;
   background: var(--dash-glow);
   z-index: 1;
@@ -396,30 +431,32 @@ html.light .glass-panel-hover:hover {
 .nebula-emerald{ background: radial-gradient(circle, rgba(16, 185, 129, 0.40) 0%, rgba(20, 184, 166, 0.25) 40%, transparent 70%); }
 .nebula-ruby   { background: radial-gradient(circle, rgba(244, 63, 94, 0.45) 0%, rgba(229, 9, 20, 0.25) 40%, transparent 70%); }
 
-/* Aurora ribbons (large conic gradients) */
+/* Aurora ribbons (GPU-friendly masked conic gradients — zero runtime Gaussian blur cost) */
 .aurora-ribbon {
   background: conic-gradient(
     from 0deg,
-    rgba(236, 72, 153, 0.20) 0deg,
-    rgba(139, 92, 246, 0.25) 60deg,
-    rgba(6, 182, 212, 0.20) 120deg,
-    rgba(16, 185, 129, 0.18) 180deg,
-    rgba(245, 158, 11, 0.15) 240deg,
-    rgba(236, 72, 153, 0.20) 360deg
+    rgba(236, 72, 153, 0.18) 0deg,
+    rgba(139, 92, 246, 0.22) 60deg,
+    rgba(6, 182, 212, 0.18) 120deg,
+    rgba(16, 185, 129, 0.15) 180deg,
+    rgba(245, 158, 11, 0.12) 240deg,
+    rgba(236, 72, 153, 0.18) 360deg
   );
-  filter: blur(80px);
+  -webkit-mask-image: radial-gradient(circle, rgba(0,0,0,0.85) 10%, rgba(0,0,0,0.35) 42%, transparent 68%);
+  mask-image: radial-gradient(circle, rgba(0,0,0,0.85) 10%, rgba(0,0,0,0.35) 42%, transparent 68%);
   border-radius: 50%;
 }
 .aurora-ribbon-2 {
   background: conic-gradient(
     from 180deg,
-    rgba(59, 130, 246, 0.22) 0deg,
-    rgba(168, 85, 247, 0.28) 90deg,
-    rgba(236, 72, 153, 0.18) 180deg,
-    rgba(20, 184, 166, 0.20) 270deg,
-    rgba(59, 130, 246, 0.22) 360deg
+    rgba(59, 130, 246, 0.18) 0deg,
+    rgba(168, 85, 247, 0.22) 90deg,
+    rgba(236, 72, 153, 0.15) 180deg,
+    rgba(20, 184, 166, 0.16) 270deg,
+    rgba(59, 130, 246, 0.18) 360deg
   );
-  filter: blur(60px);
+  -webkit-mask-image: radial-gradient(circle, rgba(0,0,0,0.8) 12%, rgba(0,0,0,0.3) 45%, transparent 68%);
+  mask-image: radial-gradient(circle, rgba(0,0,0,0.8) 12%, rgba(0,0,0,0.3) 45%, transparent 68%);
   border-radius: 50%;
 }
 
@@ -545,8 +582,16 @@ html.light .animate-cosmic-twinkle {
 }
 
 /* ========================================================================= */
-/* ARN Stream Side Navigation Bar Offsets (Responsive to Arabic RTL & English LTR) */
+/* ARN Stream Side Navigation Bar Offsets & Smooth Fluid Transitions */
 /* ========================================================================= */
+.arn-sidebar {
+  transition: width 420ms cubic-bezier(0.16, 1, 0.3, 1), 
+              box-shadow 420ms cubic-bezier(0.16, 1, 0.3, 1), 
+              border-color 350ms ease, 
+              background 350ms ease !important;
+  will-change: width;
+}
+
 @media (min-width: 768px) {
   /* Arabic RTL: Sidebar is on the Right */
   html[dir="rtl"] body:has(.arn-sidebar) main,
@@ -574,3 +619,229 @@ html.light .animate-cosmic-twinkle {
 
 
 
+
+
+/* ══════════════════════════════════════════════════════════════
+   ARN Dashboard – Official / Professional Theme Overrides
+   استغلال كامل للمساحة، ألوان نصوص صلبة بدون تدرج، رموز ونصوص أكبر
+   ══════════════════════════════════════════════════════════════ */
+
+/* 1. إلغاء تدرج ألوان النصوص نهائياً */
+.dash-scope .bg-clip-text,
+.dash-scope .text-transparent {
+  background-image: none !important;
+  -webkit-text-fill-color: currentColor !important;
+  color: var(--dash-heading-text) !important;
+}
+
+/* 2. بطاقات رسمية: خلفية موحدة، بدون قفزات أو توهج */
+.dash-scope .dash-card {
+  border-radius: 18px;
+  background: var(--dash-card-bg) !important;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22);
+}
+.dash-scope .dash-card::before { display: none; }
+.dash-scope .dash-card:hover {
+  transform: none;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+}
+.dash-scope .dash-card-inner.p-4,
+.dash-scope .dash-card-inner.p-3,
+.dash-scope .dash-card-inner.p-5 { padding: 1.5rem !important; }
+
+/* 3. نصوص أوضح وأكبر لسهولة القراءة */
+.dash-scope .text-\[9px\],
+.dash-scope .text-\[10px\] { font-size: 12.5px !important; }
+.dash-scope .text-\[11px\] { font-size: 13.5px !important; }
+.dash-scope .text-xs { font-size: 14px !important; line-height: 1.6 !important; }
+.dash-scope .text-sm { font-size: 16px !important; line-height: 1.6 !important; }
+.dash-scope .text-base { font-size: 18px !important; }
+.dash-scope .text-lg { font-size: 21px !important; }
+.dash-scope .text-xl { font-size: 24px !important; }
+.dash-scope .text-2xl { font-size: 30px !important; }
+.dash-scope h3 { font-weight: 800; }
+
+/* 4. رموز أكبر: صناديق الأيقونات + أيقونات SVG */
+.dash-scope .w-9.h-9,
+.dash-scope .w-10.h-10 { width: 3.5rem !important; height: 3.5rem !important; border-radius: 16px !important; }
+.dash-scope .w-9.h-9 > svg,
+.dash-scope .w-10.h-10 > svg { width: 28px !important; height: 28px !important; }
+.dash-scope button svg { min-width: 18px; min-height: 18px; }
+
+/* 5. أزرار أكبر وأسهل في الضغط */
+.dash-scope button.text-xs,
+.dash-scope a.text-xs {
+  padding-top: 0.65rem !important;
+  padding-bottom: 0.65rem !important;
+  padding-inline: 1.1rem !important;
+  border-radius: 12px !important;
+}
+.dash-scope select,
+.dash-scope input[type="text"],
+.dash-scope input[type="search"] { font-size: 15px !important; min-height: 42px; }
+
+/* 6. استغلال المساحة: فجوات شبكات أوسع */
+.dash-scope .gap-3 { gap: 1rem !important; }
+.dash-scope .gap-4 { gap: 1.25rem !important; }
+.dash-scope .space-y-3 > :not([hidden]) ~ :not([hidden]) { margin-top: 1rem !important; }
+.dash-scope .space-y-4 > :not([hidden]) ~ :not([hidden]) { margin-top: 1.25rem !important; }
+
+/* ══════════════════════════════════════════════════════════════
+   ⚡ ARN Stream High-Velocity Rendering & GPU Optimization
+   ══════════════════════════════════════════════════════════════ */
+.contain-paint {
+  contain: layout style paint;
+}
+
+/* Skips layout & painting for off-screen media cards in huge libraries */
+.cv-card {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 290px;
+}
+
+.cv-row {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 60px;
+}
+
+/* Turbo / Eco GPU Mode — disables expensive per-card backdrop-filter while preserving rich dark surfaces */
+html.perf-turbo .backdrop-blur-sm,
+html.perf-turbo .backdrop-blur,
+html.perf-turbo .backdrop-blur-md {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html.perf-turbo:not(.light) .dark\:bg-surface\/60 {
+  background-color: rgba(18, 24, 38, 0.92) !important;
+}
+
+/* Cinematic Glass Shimmer Skeleton */
+@keyframes arnShimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.arn-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.03) 25%,
+    rgba(255, 255, 255, 0.09) 50%,
+    rgba(255, 255, 255, 0.03) 75%
+  );
+  background-size: 200% 100%;
+  animation: arnShimmer 1.6s infinite linear;
+}
+
+html.light .arn-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(15, 23, 42, 0.04) 25%,
+    rgba(15, 23, 42, 0.09) 50%,
+    rgba(15, 23, 42, 0.04) 75%
+  );
+  background-size: 200% 100%;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   📺 ARN IPTV Pro Native Player & Workspace Styles
+   ══════════════════════════════════════════════════════════════ */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+input[type="range"].arn-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  direction: ltr !important;
+}
+
+input[type="range"].arn-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+input[type="range"].arn-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+input[type="range"].arn-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #f8fafc;
+  border: 2px solid #8b5cf6;
+  margin-top: -4.5px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.55);
+  transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1), background-color 160ms ease;
+}
+
+input[type="range"].arn-slider::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #f8fafc;
+  border: 2px solid #8b5cf6;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.55);
+}
+
+input[type="range"].arn-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.16);
+  background: #ffffff;
+}
+
+@keyframes pulseEqualizer {
+  0% {
+    height: 18%;
+    opacity: 0.6;
+  }
+  50% {
+    height: 100%;
+    opacity: 1;
+  }
+  100% {
+    height: 30%;
+    opacity: 0.75;
+  }
+}
+
+@keyframes tickerMarqueeLTR {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100vw);
+  }
+}
+
+.arn-ticker-track {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  animation: tickerMarqueeLTR 42s linear infinite;
+  will-change: transform;
+}
+
+@keyframes nowPlayingTimer {
+  0% {
+    width: 100%;
+  }
+  100% {
+    width: 0%;
+  }
+}
+
+.animate-nowPlayingTimer {
+  animation: nowPlayingTimer 30s linear forwards;
+}

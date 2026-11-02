@@ -27,7 +27,7 @@ export async function searchSubtitles(query, { language = 'ar', year = null, typ
     const response = await fetch(url, {
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'ARNStream v2.0.3'
+        'User-Agent': 'ARNStream v3.0.1'
       }
     });
     if (!response.ok) return [];

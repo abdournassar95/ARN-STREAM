@@ -377,7 +377,7 @@ export default function MovieDetails() {
             </div>
 
             {/* Movie Title */}
-            <h1 className="text-3xl sm:text-4xl md:text-5xl font-black text-text leading-tight tracking-tight">
+            <h1 className="text-3xl sm:text-4xl md:text-5xl font-black text-text leading-normal py-1 tracking-tight">
               {movie.title}
             </h1>
 
@@ -437,7 +437,6 @@ export default function MovieDetails() {
                       currentTime: playbackPos > 30 ? playbackPos : 0,
                       duration: movie.duration
                     });
-                    openFullRemote();
                   }}
                   className="inline-flex items-center gap-2 px-7 py-3 rounded-2xl bg-gradient-to-r from-red-600 to-rose-600 text-white font-bold hover:brightness-110 shadow-xl shadow-red-900/40 active:scale-95 transition border border-rose-400/40 animate-pulse"
                 >
@@ -448,7 +447,7 @@ export default function MovieDetails() {
 
               {/* Play from beginning */}
               <Link
-                to={`/watch/movie/${movie.id}`}
+                to={`/watch/movie/${movie.id}?startFromBeginning=true`}
                 onClick={handlePlayMovieClick}
                 className="inline-flex items-center gap-2 px-7 py-3 rounded-2xl bg-primaryMovies text-white font-bold hover:brightness-110 shadow-lg shadow-primaryMovies/30 active:scale-95 transition"
               >
@@ -459,7 +458,7 @@ export default function MovieDetails() {
               {/* Resume playback if started */}
               {playbackPos > 30 && (
                 <Link
-                  to={`/watch/movie/${movie.id}?t=${Math.floor(playbackPos)}&autoPlay=true`}
+                  to={`/watch/movie/${movie.id}?t=${Math.floor(playbackPos)}&autoPlay=true&resume=true`}
                   onClick={handlePlayMovieClick}
                   className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-slate-100 hover:bg-slate-200 dark:bg-surfaceHover dark:hover:bg-tx/10 text-text font-bold border border-slate-200 dark:border-white/10 active:scale-95 transition shadow-sm"
                 >
@@ -563,7 +562,7 @@ export default function MovieDetails() {
                       : `Current playlist has (${movieItemsInQueue.length}) movies`}
                   </span>
                   <Link
-                    to={`/watch/movie/${movieItemsInQueue[0].id}`}
+                    to={`/watch/movie/${movieItemsInQueue[0].id}?autoPlay=true&startFromBeginning=true`}
                     className="text-primaryMovies font-bold hover:underline ms-1"
                   >
                     {isRtl ? 'تشغيل القائمة الآن' : 'Play Queue Now'}
@@ -606,7 +605,7 @@ export default function MovieDetails() {
                 </div>
               </div>
               <Link
-                to={`/watch/movie/${movie.id}?t=${Math.floor(playbackPos)}&autoPlay=true`}
+                to={`/watch/movie/${movie.id}?t=${Math.floor(playbackPos)}&autoPlay=true&resume=true`}
                 onClick={handlePlayMovieClick}
                 className="px-4 py-2 rounded-xl bg-primaryMovies hover:brightness-110 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
               >

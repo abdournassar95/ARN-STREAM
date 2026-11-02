@@ -8,27 +8,74 @@
  * ══════════════════════════════════════════════════════════════════════════════
  */
 
-import { useEffect, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useDeviceHandoffStore } from '../../store/useDeviceHandoffStore';
 import { usePlayerStore } from '../../store/usePlayerStore';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useScanStore } from '../../store/useScanStore';
 import ScanProgressNotification from './ScanProgressNotification';
-import { Tv, Sparkles, X, Keyboard } from 'lucide-react';
+import { Tv, Sparkles, X, Keyboard, Cast, Radio } from 'lucide-react';
 
 export default function DeviceHandoffListener() {
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const deviceId = useDeviceHandoffStore(s => s.deviceId);
   const registerDevice = useDeviceHandoffStore(s => s.registerDevice);
   const syncUser = useDeviceHandoffStore(s => s.syncUser);
   const initWebSocket = useDeviceHandoffStore(s => s.initWebSocket);
   const disconnectWebSocket = useDeviceHandoffStore(s => s.disconnectWebSocket);
+  const activeRemoteSession = useDeviceHandoffStore(s => s.activeRemoteSession);
+  const isMirroringActive = useDeviceHandoffStore(s => s.isMirroringActive);
+  const sendRemoteCommand = useDeviceHandoffStore(s => s.sendRemoteCommand);
   const user = useAuthStore(state => state.user);
   const playTrack = usePlayerStore(s => s.playTrack);
   const [toast, setToast] = useState(null);
+
+  // Guards against echo loops during remote mirroring
+  const isRemoteNavigatingRef = useRef(false);
+  const lastSentPathRef = useRef('');
+  const isRemoteScrollingRef = useRef(false);
+
+  const fullPath = location.pathname + location.search + location.hash;
+
+  // 1. Controller side: Live Navigation Mirroring
+  // Whenever the controller user changes route (opens a library, movie, series, etc.), mirror to target
+  useEffect(() => {
+    if (!activeRemoteSession?.targetDeviceId || !isMirroringActive) return;
+    if (isRemoteNavigatingRef.current) return;
+    if (lastSentPathRef.current === fullPath) return;
+
+    lastSentPathRef.current = fullPath;
+    sendRemoteCommand('navigate', { path: fullPath, fromMirror: true });
+  }, [fullPath, activeRemoteSession?.targetDeviceId, isMirroringActive, sendRemoteCommand]);
+
+  // 2. Controller side: Throttled Scroll Mirroring
+  useEffect(() => {
+    if (!activeRemoteSession?.targetDeviceId || !isMirroringActive) return;
+
+    let scrollThrottleTimer = null;
+    const handleWindowScroll = () => {
+      if (isRemoteScrollingRef.current) return;
+      if (scrollThrottleTimer) return;
+
+      scrollThrottleTimer = setTimeout(() => {
+        scrollThrottleTimer = null;
+        const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+        const scrollY = window.scrollY;
+        const ratio = scrollY / maxScroll;
+        sendRemoteCommand('scroll_sync', { y: scrollY, ratio });
+      }, 70);
+    };
+
+    window.addEventListener('scroll', handleWindowScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', handleWindowScroll);
+      if (scrollThrottleTimer) clearTimeout(scrollThrottleTimer);
+    };
+  }, [activeRemoteSession?.targetDeviceId, isMirroringActive, sendRemoteCommand]);
 
   // Sync device name & registration when user logs in/out, and check scan status
   useEffect(() => {
@@ -44,7 +91,8 @@ export default function DeviceHandoffListener() {
     // Show Toast notification
     setToast({
       title: 'تم استلام البث',
-      desc: `من "${fromDeviceName}": ${media.title || 'مقطع وسائط'}`
+      desc: `من "${fromDeviceName}": ${media.title || 'مقطع وسائط'}`,
+      type: 'handoff'
     });
 
     setTimeout(() => setToast(null), 6000);
@@ -65,14 +113,32 @@ export default function DeviceHandoffListener() {
     }
   }, [navigate, playTrack]);
 
-  // Handle incoming remote commands
+  // Handle incoming remote commands (both from WS and SSE)
   const processRemoteCommand = useCallback((data) => {
     if (!data) return;
     const { command, value } = data;
 
     if (command === 'navigate') {
       const targetPath = typeof value === 'string' ? value : value?.path;
-      if (targetPath) navigate(targetPath);
+      if (targetPath) {
+        const currentPath = window.location.pathname + window.location.search + window.location.hash;
+        if (targetPath !== currentPath) {
+          isRemoteNavigatingRef.current = true;
+          lastSentPathRef.current = targetPath;
+          navigate(targetPath);
+          setTimeout(() => {
+            isRemoteNavigatingRef.current = false;
+          }, 400);
+        }
+      }
+    } else if (command === 'scroll_sync' && value) {
+      isRemoteScrollingRef.current = true;
+      const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+      const targetY = value.ratio !== undefined ? Math.round(value.ratio * maxScroll) : (value.y || 0);
+      window.scrollTo({ top: targetY, behavior: 'smooth' });
+      setTimeout(() => {
+        isRemoteScrollingRef.current = false;
+      }, 100);
     } else if (command === 'display_content') {
       const { type, id } = value || {};
       if (type === 'movie') {
@@ -113,6 +179,17 @@ export default function DeviceHandoffListener() {
 
     // 4. Listen to WebSocket custom events
     const handleWsHandoff = (e) => processIncomingHandoff(e.detail);
+    const handleWsRemoteCmd = (e) => processRemoteCommand(e.detail);
+    const handleMirroringStarted = (e) => {
+      const devName = e.detail?.targetDeviceName || 'الجهاز الآخر';
+      setToast({
+        title: 'التحكم الكامل والمزامنة نشطة',
+        desc: `أي حركة أو اختيار مكتبة/فيلم يتم عرضها لحظياً على "${devName}"`,
+        type: 'mirror'
+      });
+      setTimeout(() => setToast(null), 6000);
+    };
+
     const handleWsLibraryUpdate = (e) => {
       const data = e.detail;
       setToast({
@@ -135,6 +212,8 @@ export default function DeviceHandoffListener() {
     };
 
     window.addEventListener('arn-handoff-received', handleWsHandoff);
+    window.addEventListener('arn-remote-command', handleWsRemoteCmd);
+    window.addEventListener('arn-mirroring-started', handleMirroringStarted);
     window.addEventListener('arn-library-updated', handleWsLibraryUpdate);
     window.addEventListener('arn-scan-progress', handleWsScanProgress);
     window.addEventListener('arn-scan-completed', handleWsScanCompleted);
@@ -202,6 +281,8 @@ export default function DeviceHandoffListener() {
     return () => {
       clearInterval(heartbeatId);
       window.removeEventListener('arn-handoff-received', handleWsHandoff);
+      window.removeEventListener('arn-remote-command', handleWsRemoteCmd);
+      window.removeEventListener('arn-mirroring-started', handleMirroringStarted);
       window.removeEventListener('arn-library-updated', handleWsLibraryUpdate);
       window.removeEventListener('arn-scan-progress', handleWsScanProgress);
       window.removeEventListener('arn-scan-completed', handleWsScanCompleted);
@@ -213,6 +294,7 @@ export default function DeviceHandoffListener() {
   }, [deviceId, registerDevice, initWebSocket, disconnectWebSocket, processIncomingHandoff, processRemoteCommand, queryClient]);
 
   const isScan = toast?.type === 'scan';
+  const isMirror = toast?.type === 'mirror';
 
   return (
     <>
@@ -220,13 +302,23 @@ export default function DeviceHandoffListener() {
 
       {toast && (
         <div className="fixed top-5 end-5 z-[100] max-w-sm w-full animate-slideInRight">
-          <div className={`flex items-center gap-3.5 p-4 rounded-2xl bg-[#0f172a]/95 text-white border shadow-2xl backdrop-blur-xl ${isScan ? 'border-amber-500/40' : 'border-emerald-500/40'}`}>
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 border shadow-sm ${isScan ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'}`}>
-              {isScan ? <Sparkles size={20} /> : <Tv size={20} />}
+          <div className={`flex items-center gap-3.5 p-4 rounded-2xl bg-[#0f172a]/95 text-white border shadow-2xl backdrop-blur-xl ${
+            isScan 
+              ? 'border-amber-500/40' 
+              : (isMirror ? 'border-rose-500/40 shadow-rose-950/50' : 'border-emerald-500/40')
+          }`}>
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 border shadow-sm ${
+              isScan 
+                ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' 
+                : (isMirror ? 'bg-gradient-to-tr from-red-600/30 to-rose-600/30 text-rose-300 border-rose-500/40' : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30')
+            }`}>
+              {isScan ? <Sparkles size={20} /> : (isMirror ? <Radio size={20} className="animate-pulse" /> : <Tv size={20} />)}
             </div>
             <div className="flex-1 min-w-0">
-              <div className={`flex items-center gap-1.5 text-xs font-bold ${isScan ? 'text-amber-400' : 'text-emerald-400'}`}>
-                {isScan ? <Sparkles size={12} /> : <Tv size={12} />}
+              <div className={`flex items-center gap-1.5 text-xs font-bold ${
+                isScan ? 'text-amber-400' : (isMirror ? 'text-rose-400' : 'text-emerald-400')
+              }`}>
+                {isScan ? <Sparkles size={12} /> : (isMirror ? <Radio size={12} className="animate-pulse" /> : <Tv size={12} />)}
                 <span>{toast.title}</span>
               </div>
               <div className="text-xs text-slate-200 truncate mt-0.5 font-medium">

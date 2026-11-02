@@ -5,7 +5,7 @@
 ; ==============================================================================
 
 #define MyAppName "ARN Stream"
-#define MyAppVersion "2.1.0"
+#define MyAppVersion "3.0.1"
 #define MyAppPublisher "ARN Technology"
 #define MyAppURL "https://facebook.com/abdouragab.nassar"
 #define MyAppExeName "ARN_Stream.exe"

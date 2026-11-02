@@ -5,7 +5,7 @@
 
 ![ARN Stream Logo](launcher/assets/icon.png)
 
-**الإصدار:** v2.0.3 • **المطور:** عبده رجب نصار • **الشركة:** ARN Technology  
+**الإصدار:** v3.0.1 • **المطور:** عبده رجب نصار • **الشركة:** ARN Technology  
 **الهوية:** تصميم عصري فاخر (Dark Glassmorphic UI) مع أداء عالي وسرعة استجابة فائقة.
 
 [![Node.js](https://img.shields.io/badge/Node.js-v18%2B-green.svg?logo=node.js)](https://nodejs.org/)

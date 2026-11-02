@@ -13,7 +13,7 @@ import db from '../db.js';
  * 4. Strictly sorted by `updated_at DESC`.
  */
 export function getContinueWatching(userId = 1, options = {}) {
-  const { limit = 15 } = options;
+  const { limit = 8 } = options;
 
   // 1. In-progress movies
   const movies = db.prepare(`
@@ -52,7 +52,8 @@ export function getContinueWatching(userId = 1, options = {}) {
       progress: m.duration ? Math.min(100, (m.position / m.duration) * 100) : 0,
       updated_at: m.updated_at,
       poster: poster ? `/api/image/${poster.id}/thumb` : null,
-      backdrop: backdrop ? `/api/image/${backdrop.id}/thumb` : (poster ? `/api/image/${poster.id}/thumb` : null)
+      backdrop: backdrop ? `/api/image/${backdrop.id}/full` : (poster ? `/api/image/${poster.id}/full` : null),
+      backdropThumb: backdrop ? `/api/image/${backdrop.id}/thumb` : (poster ? `/api/image/${poster.id}/thumb` : null)
     };
   });
 
@@ -182,7 +183,8 @@ export function getContinueWatching(userId = 1, options = {}) {
       isNextUp,
       updated_at: updatedAt,
       poster: poster ? `/api/image/${poster.id}/thumb` : null,
-      backdrop: backdrop ? `/api/image/${backdrop.id}/thumb` : (poster ? `/api/image/${poster.id}/thumb` : null)
+      backdrop: backdrop ? `/api/image/${backdrop.id}/full` : (poster ? `/api/image/${poster.id}/full` : null),
+      backdropThumb: backdrop ? `/api/image/${backdrop.id}/thumb` : (poster ? `/api/image/${poster.id}/thumb` : null)
     });
   }
 
@@ -193,7 +195,134 @@ export function getContinueWatching(userId = 1, options = {}) {
 }
 
 /**
- * Remove playback history for a media item or an entire series.
+ * Get clean, deduplicated, and dynamic Continue Listening list for a user (max 8 items by default).
+ * Deduplicated per album so the user gets up to 8 distinct albums/recitations,
+ * with full artist backdrop/poster and album cover artwork.
+ */
+function stripAudioExt(name) {
+  if (!name) return '';
+  return String(name).replace(/\.(mp3|flac|m4a|wav|ogg|aac|wma|opus)$/i, '').trim();
+}
+
+export function getContinueListening(userId = 1, options = {}) {
+  const { limit = 8 } = options;
+
+  const rows = db.prepare(`
+    SELECT ps.id as playback_id, ps.position, ps.duration as saved_duration, ps.updated_at,
+           t.id as track_id, t.title as track_title, t.track_number, t.duration as track_duration,
+           al.id as album_id, al.title as album_title, al.year,
+           ar.id as artist_id, ar.name as artist_name
+    FROM playback_state ps
+    JOIN tracks t ON t.id = ps.media_id
+    JOIN albums al ON al.id = t.album_id
+    JOIN artists ar ON ar.id = al.artist_id
+    WHERE ps.user_id = ?
+      AND (ps.media_type = 'track' OR ps.media_type = 'audio')
+      AND ps.position > 3
+    ORDER BY ps.updated_at DESC
+  `).all(userId);
+
+  const seenAlbums = new Set();
+  const items = [];
+
+  for (const r of rows) {
+    if (seenAlbums.has(r.album_id)) continue;
+
+    let targetTrack = {
+      id: r.track_id,
+      title: r.track_title,
+      track_number: r.track_number,
+      duration: r.track_duration || r.saved_duration || 0
+    };
+    let position = r.position || 0;
+    let duration = r.saved_duration || r.track_duration || 0;
+    let isNextUp = false;
+
+    // If track is >= 95% finished, try advancing to the next track in the album
+    if (duration > 0 && position >= duration * 0.95) {
+      const nextTrack = db.prepare(`
+        SELECT id, title, track_number, duration
+        FROM tracks
+        WHERE album_id = ? AND (
+          (track_number IS NOT NULL AND ? IS NOT NULL AND track_number > ?)
+          OR (id > ? AND (track_number IS NULL OR ? IS NULL))
+        )
+        ORDER BY COALESCE(track_number, 999999) ASC, id ASC
+        LIMIT 1
+      `).get(r.album_id, r.track_number, r.track_number, r.track_id, r.track_number);
+
+      if (nextTrack) {
+        targetTrack = nextTrack;
+        position = 0;
+        duration = nextTrack.duration || 0;
+        isNextUp = true;
+      } else {
+        // Entire album finished
+        continue;
+      }
+    }
+
+    seenAlbums.add(r.album_id);
+
+    const albumCover = db.prepare(`
+      SELECT id FROM images
+      WHERE media_type = 'album' AND media_id = ? AND (image_type = 'album_cover' OR image_type = 'poster')
+      ORDER BY is_primary DESC, id DESC LIMIT 1
+    `).get(r.album_id);
+
+    const artistPoster = db.prepare(`
+      SELECT id FROM images
+      WHERE media_type = 'artist' AND media_id = ? AND (image_type = 'poster' OR image_type = 'avatar')
+      ORDER BY is_primary DESC, id DESC LIMIT 1
+    `).get(r.artist_id);
+
+    const artistBackdrop = db.prepare(`
+      SELECT id FROM images
+      WHERE media_type = 'artist' AND media_id = ? AND (image_type = 'backdrop' OR image_type = 'fanart')
+      ORDER BY is_primary DESC, id DESC LIMIT 1
+    `).get(r.artist_id);
+
+    const coverId = albumCover?.id || artistPoster?.id || null;
+    const backdropId = artistBackdrop?.id || albumCover?.id || artistPoster?.id || null;
+
+    const progress = duration > 0 ? Math.min(100, Math.max(0, (position / duration) * 100)) : 0;
+
+    items.push({
+      playbackId: r.playback_id,
+      id: targetTrack.id,
+      trackId: targetTrack.id,
+      mediaId: targetTrack.id,
+      albumId: r.album_id,
+      artistId: r.artist_id,
+      type: 'audio',
+      media_type: 'track',
+      title: stripAudioExt(targetTrack.title),
+      trackTitle: stripAudioExt(targetTrack.title),
+      trackNumber: targetTrack.track_number,
+      albumTitle: stripAudioExt(r.album_title),
+      artistName: r.artist_name,
+      year: r.year,
+      position,
+      duration,
+      progress,
+      isNextUp,
+      updated_at: r.updated_at,
+      cover: coverId ? `/api/image/${coverId}/thumb` : null,
+      poster: coverId ? `/api/image/${coverId}/thumb` : null,
+      posterFull: coverId ? `/api/image/${coverId}/full` : null,
+      backdrop: backdropId ? `/api/image/${backdropId}/full` : null,
+      backdropThumb: backdropId ? `/api/image/${backdropId}/thumb` : null,
+      artistAvatar: artistPoster ? `/api/image/${artistPoster.id}/thumb` : null
+    });
+
+    if (items.length >= limit) break;
+  }
+
+  return items;
+}
+
+/**
+ * Remove playback history for a media item or an entire series/album.
  */
 export function removePlaybackState(userId, mediaType, mediaId) {
   if (mediaType === 'series') {
@@ -204,6 +333,22 @@ export function removePlaybackState(userId, mediaType, mediaId) {
         JOIN seasons sea ON sea.id = ep.season_id
         WHERE sea.series_id = ?
       )
+    `).run(userId, Number(mediaId));
+  }
+
+  if (mediaType === 'album') {
+    return db.prepare(`
+      DELETE FROM playback_state
+      WHERE user_id = ? AND (media_type = 'track' OR media_type = 'audio') AND media_id IN (
+        SELECT id FROM tracks WHERE album_id = ?
+      )
+    `).run(userId, Number(mediaId));
+  }
+
+  if (mediaType === 'track' || mediaType === 'audio') {
+    return db.prepare(`
+      DELETE FROM playback_state
+      WHERE user_id = ? AND (media_type = 'track' OR media_type = 'audio') AND media_id = ?
     `).run(userId, Number(mediaId));
   }
 

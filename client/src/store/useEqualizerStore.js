@@ -2,13 +2,16 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 export const EQ_BANDS = [
-  { id: '60', label: '60Hz', desc: 'Sub-Bass', freq: 60, type: 'lowshelf' },
-  { id: '170', label: '170Hz', desc: 'Bass', freq: 170, type: 'peaking' },
-  { id: '350', label: '350Hz', desc: 'Low-Mid', freq: 350, type: 'peaking' },
-  { id: '1000', label: '1kHz', desc: 'Mid', freq: 1000, type: 'peaking' },
-  { id: '3000', label: '3kHz', desc: 'High-Mid', freq: 3000, type: 'peaking' },
-  { id: '6000', label: '6kHz', desc: 'Treble', freq: 6000, type: 'peaking' },
-  { id: '12000', label: '12kHz', desc: 'Air', freq: 12000, type: 'highshelf' },
+  { id: '31', label: '31Hz', shortLabel: '31', desc: 'Sub-Bass', freq: 31, type: 'lowshelf' },
+  { id: '62', label: '62Hz', shortLabel: '62', desc: 'Bass', freq: 62, type: 'peaking' },
+  { id: '125', label: '125Hz', shortLabel: '125', desc: 'Warmth', freq: 125, type: 'peaking' },
+  { id: '250', label: '250Hz', shortLabel: '250', desc: 'Low-Mid', freq: 250, type: 'peaking' },
+  { id: '500', label: '500Hz', shortLabel: '500', desc: 'Mid', freq: 500, type: 'peaking' },
+  { id: '1000', label: '1kHz', shortLabel: '1k', desc: 'Presence', freq: 1000, type: 'peaking' },
+  { id: '2000', label: '2kHz', shortLabel: '2k', desc: 'Upper-Mid', freq: 2000, type: 'peaking' },
+  { id: '4000', label: '4kHz', shortLabel: '4k', desc: 'High-Mid', freq: 4000, type: 'peaking' },
+  { id: '8000', label: '8kHz', shortLabel: '8k', desc: 'Treble', freq: 8000, type: 'peaking' },
+  { id: '16000', label: '16kHz', shortLabel: '16k', desc: 'Air', freq: 16000, type: 'highshelf' },
 ];
 
 export const EQ_PRESETS = {
@@ -16,88 +19,159 @@ export const EQ_PRESETS = {
     id: 'flat',
     nameAr: 'عادي (Flat)',
     nameEn: 'Flat',
-    gains: [0, 0, 0, 0, 0, 0, 0],
+    gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     preamp: 0
   },
   bassBoost: {
     id: 'bassBoost',
     nameAr: 'مضخم البيز (Bass Boost)',
     nameEn: 'Bass Boost',
-    gains: [7, 5, 2, 0, 0, 0, 0],
+    gains: [7, 6, 5, 3, 1, 0, 0, 0, 0, 0],
     preamp: -2
   },
   bassReducer: {
     id: 'bassReducer',
     nameAr: 'تخفيف البيز (Bass Reducer)',
     nameEn: 'Bass Reducer',
-    gains: [-6, -4, -2, 0, 0, 0, 0],
+    gains: [-7, -6, -4, -2, 0, 0, 0, 0, 0, 0],
     preamp: 0
   },
   vocal: {
     id: 'vocal',
     nameAr: 'وضوح الصوت (Vocal Boost)',
     nameEn: 'Vocal Boost',
-    gains: [-2, -1, 2, 5, 4, 2, 0],
+    gains: [-2, -1, 0, 2, 4, 5, 4, 2, 1, 0],
     preamp: 0
   },
   pop: {
     id: 'pop',
     nameAr: 'بوب (Pop)',
     nameEn: 'Pop',
-    gains: [-1, 2, 4, 3, 1, -1, 1],
+    gains: [-1, 1, 2, 3, 4, 3, 2, 1, 0, 1],
     preamp: 0
   },
   rock: {
     id: 'rock',
     nameAr: 'روك (Rock)',
     nameEn: 'Rock',
-    gains: [5, 4, -1, -2, 1, 3, 5],
+    gains: [5, 4, 3, -1, -2, 0, 2, 4, 5, 5],
     preamp: -1
   },
   electronic: {
     id: 'electronic',
     nameAr: 'إلكتروني (Electronic)',
     nameEn: 'Electronic',
-    gains: [6, 4, 1, -1, 2, 4, 5],
+    gains: [6, 5, 4, 1, -1, 1, 2, 4, 5, 5],
     preamp: -2
   },
   classical: {
     id: 'classical',
     nameAr: 'كلاسيكي (Classical)',
     nameEn: 'Classical',
-    gains: [4, 3, 2, 1, -1, 2, 4],
+    gains: [4, 3, 3, 2, 1, 0, 1, 2, 3, 4],
     preamp: 0
   },
   acoustic: {
     id: 'acoustic',
     nameAr: 'صوت هادئ (Acoustic)',
     nameEn: 'Acoustic',
-    gains: [3, 2, 1, 2, 2, 3, 3],
+    gains: [3, 3, 2, 1, 2, 2, 3, 3, 3, 2],
     preamp: 0
   },
   trebleBoost: {
     id: 'trebleBoost',
     nameAr: 'تريبل حاد (Treble Boost)',
     nameEn: 'Treble Boost',
-    gains: [0, 0, 0, 0, 2, 5, 7],
+    gains: [0, 0, 0, 0, 0, 1, 2, 4, 6, 7],
     preamp: -1
+  },
+  // ── أوضاع مخصصة للفيديو والبث التليفزيوني والراديو ──
+  cinema: {
+    id: 'cinema',
+    nameAr: 'سينما (Cinema)',
+    shortAr: 'سينما',
+    nameEn: 'Cinema',
+    gains: [6, 5, 3, 0, -1, 0, 1, 2, 3, 4],
+    preamp: -3
+  },
+  dialogue: {
+    id: 'dialogue',
+    nameAr: 'تعزيز الحوار (Dialogue)',
+    shortAr: 'الحوار',
+    nameEn: 'Dialogue',
+    gains: [-4, -3, -2, 0, 2, 5, 6, 4, 1, -1],
+    preamp: -2
+  },
+  night: {
+    id: 'night',
+    nameAr: 'الوضع الليلي (Night)',
+    shortAr: 'ليلي',
+    nameEn: 'Night',
+    gains: [-6, -5, -3, -1, 1, 3, 3, 1, -2, -4],
+    preamp: 0
+  },
+  radio: {
+    id: 'radio',
+    nameAr: 'إذاعة وقرآن (Radio & Quran)',
+    shortAr: 'إذاعة',
+    nameEn: 'Radio',
+    gains: [-2, -1, 1, 2, 3, 4, 3, 1, -1, -3],
+    preamp: -1
+  },
+  sports: {
+    id: 'sports',
+    nameAr: 'رياضة ومباريات (Sports)',
+    shortAr: 'رياضة',
+    nameEn: 'Sports',
+    gains: [3, 2, 1, 0, 1, 3, 4, 3, 2, 2],
+    preamp: -2
   },
   custom: {
     id: 'custom',
     nameAr: 'مخصص (Custom)',
     nameEn: 'Custom',
-    gains: [0, 0, 0, 0, 0, 0, 0],
+    gains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     preamp: 0
   }
 };
+
+// مجموعات الأوضاع الجاهزة المعروضة حسب نوع المشغل
+export const EQ_PRESET_GROUPS = {
+  music: ['flat', 'bassBoost', 'vocal', 'pop', 'rock', 'electronic'],
+  video: ['flat', 'cinema', 'dialogue', 'night', 'bassBoost', 'vocal'],
+  tv: ['flat', 'dialogue', 'sports', 'cinema', 'night', 'vocal'],
+  radio: ['flat', 'radio', 'dialogue', 'vocal', 'bassReducer', 'acoustic'],
+};
+
+// تحويل حالة المخزن إلى إعدادات محرك الصوت
+export const selectEngineSettings = (state) => ({
+  bands: state.bands,
+  preamp: state.preamp,
+  enabled: state.enabled,
+  delay: {
+    enabled: state.delayEnabled,
+    time: state.delayTime,
+    feedback: state.delayFeedback,
+    wet: state.delayWet
+  },
+  echo: {
+    enabled: state.echoEnabled,
+    time: state.echoTime,
+    feedback: state.echoFeedback,
+    wet: state.echoWet
+  }
+});
+
+const DEFAULT_BANDS = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
 export const useEqualizerStore = create(
   persist(
     (set, get) => ({
       enabled: true,
       currentPreset: 'flat',
-      bands: [0, 0, 0, 0, 0, 0, 0],
+      bands: [...DEFAULT_BANDS],
       preamp: 0,
+      eqTheme: 'theme-default', // theme-default | theme-sunset | theme-forest
 
       // Delay FX
       delayEnabled: false,
@@ -113,24 +187,48 @@ export const useEqualizerStore = create(
 
       toggleEnabled: () => set(s => ({ enabled: !s.enabled })),
       setEnabled: (enabled) => set({ enabled }),
+      setEqTheme: (theme) => set({ eqTheme: theme }),
 
       setBandGain: (index, gain) => {
-        const { bands } = get();
+        const bands = get().bands && get().bands.length === 10 ? [...get().bands] : [...DEFAULT_BANDS];
         const clampedGain = Math.max(-12, Math.min(12, Math.round(gain * 10) / 10));
-        const newBands = [...bands];
-        newBands[index] = clampedGain;
+        bands[index] = clampedGain;
 
         // Check if matches any preset exactly
         let matchedPreset = 'custom';
         for (const [key, preset] of Object.entries(EQ_PRESETS)) {
           if (key === 'custom') continue;
-          if (preset.gains.every((g, i) => g === newBands[i])) {
+          if (preset.gains.every((g, i) => g === bands[i])) {
             matchedPreset = key;
             break;
           }
         }
 
-        set({ bands: newBands, currentPreset: matchedPreset });
+        set({ bands, currentPreset: matchedPreset });
+      },
+
+      setBassGain: (percent) => {
+        // percent: 0 to 100, where 50 is neutral (0dB)
+        const pct = Math.max(0, Math.min(100, percent));
+        const delta = (pct - 50) / 50; // -1 to +1
+        const bands = get().bands && get().bands.length === 10 ? [...get().bands] : [...DEFAULT_BANDS];
+        // Affect bands: 31Hz (idx 0), 62Hz (idx 1), 125Hz (idx 2)
+        bands[0] = Math.max(-12, Math.min(12, Math.round(delta * 10 * 10) / 10));
+        bands[1] = Math.max(-12, Math.min(12, Math.round(delta * 8 * 10) / 10));
+        bands[2] = Math.max(-12, Math.min(12, Math.round(delta * 5 * 10) / 10));
+        set({ bands, currentPreset: 'custom' });
+      },
+
+      setTrebleGain: (percent) => {
+        // percent: 0 to 100, where 50 is neutral (0dB)
+        const pct = Math.max(0, Math.min(100, percent));
+        const delta = (pct - 50) / 50; // -1 to +1
+        const bands = get().bands && get().bands.length === 10 ? [...get().bands] : [...DEFAULT_BANDS];
+        // Affect bands: 4kHz (idx 7), 8kHz (idx 8), 16kHz (idx 9)
+        bands[7] = Math.max(-12, Math.min(12, Math.round(delta * 5 * 10) / 10));
+        bands[8] = Math.max(-12, Math.min(12, Math.round(delta * 8 * 10) / 10));
+        bands[9] = Math.max(-12, Math.min(12, Math.round(delta * 10 * 10) / 10));
+        set({ bands, currentPreset: 'custom' });
       },
 
       setPreset: (presetId) => {
@@ -165,7 +263,7 @@ export const useEqualizerStore = create(
       reset: () => {
         set({
           currentPreset: 'flat',
-          bands: [0, 0, 0, 0, 0, 0, 0],
+          bands: [...DEFAULT_BANDS],
           preamp: 0,
           delayEnabled: false,
           delayTime: 0.25,
@@ -180,6 +278,17 @@ export const useEqualizerStore = create(
     }),
     {
       name: 'arn-stream-equalizer-settings',
+      migrate: (persistedState) => {
+        if (persistedState) {
+          if (!Array.isArray(persistedState.bands) || persistedState.bands.length !== 10) {
+            persistedState.bands = [...DEFAULT_BANDS];
+          }
+          if (!persistedState.eqTheme) {
+            persistedState.eqTheme = 'theme-default';
+          }
+        }
+        return persistedState;
+      }
     }
   )
 );

@@ -9,6 +9,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Tv,
   Smartphone,
@@ -340,8 +341,42 @@ export default function FullRemoteControlModal() {
     closeFullRemote();
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-fadeIn select-none">
+  const [mountNode, setMountNode] = useState(() => (typeof document !== 'undefined' ? document.fullscreenElement || document.body : null));
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const updateTarget = () => {
+      setMountNode(document.fullscreenElement || document.body);
+    };
+    updateTarget();
+    document.addEventListener('fullscreenchange', updateTarget);
+    document.addEventListener('webkitfullscreenchange', updateTarget);
+    document.addEventListener('mozfullscreenchange', updateTarget);
+    document.addEventListener('MSFullscreenChange', updateTarget);
+    return () => {
+      document.removeEventListener('fullscreenchange', updateTarget);
+      document.removeEventListener('webkitfullscreenchange', updateTarget);
+      document.removeEventListener('mozfullscreenchange', updateTarget);
+      document.removeEventListener('MSFullscreenChange', updateTarget);
+    };
+  }, [isFullRemoteOpen]);
+
+  useEffect(() => {
+    if (!isFullRemoteOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        closeFullRemote();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [isFullRemoteOpen, closeFullRemote]);
+
+  if (!isFullRemoteOpen || !activeRemoteSession || !mountNode) return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-[99999] flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-fadeIn select-none" onClick={closeFullRemote}>
       <div 
         className="relative w-full max-w-xl max-h-[95vh] overflow-y-auto rounded-3xl bg-[#0b1120]/95 border border-white/10 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.95)] backdrop-blur-2xl text-white flex flex-col"
         onClick={(e) => e.stopPropagation()}
@@ -624,7 +659,7 @@ export default function FullRemoteControlModal() {
                   <span className="font-mono text-white font-bold">{Math.round((isMuted ? 0 : volume) * 100)}%</span>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3" dir="ltr">
                   <button
                     onClick={() => handleVolumeChange(volume - 0.1)}
                     className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-bold text-slate-300 hover:text-white flex items-center justify-center transition"
@@ -634,6 +669,7 @@ export default function FullRemoteControlModal() {
 
                   <input
                     type="range"
+                    dir="ltr"
                     min="0"
                     max="1"
                     step="0.05"
@@ -1138,6 +1174,7 @@ export default function FullRemoteControlModal() {
 
         </div>
       </div>
-    </div>
+    </div>,
+    mountNode
   );
 }

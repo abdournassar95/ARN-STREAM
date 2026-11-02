@@ -25,7 +25,8 @@ const NEVER_CACHE = new Set([
   '/api/handoff',
   '/api/settings',
   '/api/search',
-  '/api/database'
+  '/api/database',
+  '/api/live'
 ]);
 
 // ─── Per-endpoint TTL overrides (seconds) ────────────────────────────────────
@@ -97,7 +98,8 @@ export function responseCacheMiddleware(req, res, next) {
   if (!shouldCache(req)) return next();
 
   const ttl = getTTL(req.path);
-  const cacheKey = `${req.path}:${JSON.stringify(req.query)}`;
+  const userScope = req.user ? `u${req.user.id}_${req.user.role || 'user'}` : 'anon';
+  const cacheKey = `${userScope}:${req.path}:${JSON.stringify(req.query)}`;
 
   // Check for cached response
   const cached = responseCache.get(cacheKey);

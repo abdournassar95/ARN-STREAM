@@ -1,16 +1,48 @@
-import { useState } from 'react';
+import { useState, useRef, memo } from 'react';
 import { Link } from 'react-router-dom';
-import { Disc3, Play, Check, ListPlus, Send } from 'lucide-react';
+import { Disc3, Play, Check, ListPlus, Send, Star } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useQueryClient } from '@tanstack/react-query';
 import { usePlayerStore } from '../../store/usePlayerStore';
 import { useDeviceHandoffStore } from '../../store/useDeviceHandoffStore';
+import { fetchMovie, fetchSeries, fetchArtist, fetchAlbum } from '../../api/client';
 
-export function MovieCard({ item, to, className = '', isSelectionMode = false, isSelected = false, onToggleSelect }) {
+function formatResBadge(res) {
+  if (!res) return null;
+  const r = String(res).toLowerCase();
+  if (r.includes('2160') || r.includes('4k') || r.includes('3840')) return '4K';
+  if (r.includes('1080')) return 'FHD';
+  if (r.includes('720')) return 'HD';
+  return null;
+}
+
+export const MovieCard = memo(function MovieCard({ item, to, className = '', isSelectionMode = false, isSelected = false, onToggleSelect }) {
   const { i18n } = useTranslation();
   const isRtl = i18n.language === 'ar';
   const [justAdded, setJustAdded] = useState(false);
   const addVideoToQueue = usePlayerStore(s => s.addVideoToQueue);
-  const { activeRemoteSession, playMediaOnTarget, openFullRemote } = useDeviceHandoffStore();
+  const { activeRemoteSession, playMediaOnTarget } = useDeviceHandoffStore();
+  const qc = useQueryClient();
+  const hoverTimerRef = useRef(null);
+
+  const handleMouseEnter = () => {
+    if (isSelectionMode || !to) return;
+    hoverTimerRef.current = setTimeout(() => {
+      const idStr = String(item.id);
+      if (to.startsWith('/movies/')) {
+        qc.prefetchQuery({ queryKey: ['movie', idStr], queryFn: () => fetchMovie(idStr), staleTime: 5 * 60 * 1000 });
+      } else if (to.startsWith('/series/')) {
+        qc.prefetchQuery({ queryKey: ['series', idStr], queryFn: () => fetchSeries(idStr), staleTime: 5 * 60 * 1000 });
+      }
+    }, 110);
+  };
+
+  const handleMouseLeave = () => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+  };
 
   const handleClick = (e) => {
     if (isSelectionMode && onToggleSelect) {
@@ -35,15 +67,20 @@ export function MovieCard({ item, to, className = '', isSelectionMode = false, i
     setTimeout(() => setJustAdded(false), 2000);
   };
 
+  const resBadge = formatResBadge(item.resolution);
+  const ratingVal = item.rating ? Number(item.rating).toFixed(1) : null;
+
   return (
     <Link 
       to={to} 
       onClick={handleClick}
-      className={`group relative flex-shrink-0 rounded-2xl overflow-hidden bg-white dark:bg-surface/60 backdrop-blur-sm border ${
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      className={`cv-card group relative flex-shrink-0 rounded-2xl overflow-hidden bg-white dark:bg-surface/60 backdrop-blur-sm border ${
         isSelected
           ? 'bg-primaryMovies/15 border-2 border-primaryMovies shadow-lg'
           : 'border-slate-200/80 dark:border-white/10 hover:border-slate-300 dark:hover:border-border/60'
-      } transition-all duration-180 ease-out hover:scale-[1.02] transform-gpu will-change-transform shadow-md hover:shadow-xl hover:shadow-black/10 dark:shadow-black/60 ${className || 'w-[160px] md:w-[180px]'}`}
+      } transition-[transform,box-shadow,border-color] duration-180 ease-out hover:scale-[1.02] transform-gpu hover:will-change-transform shadow-md hover:shadow-xl hover:shadow-black/10 dark:shadow-black/60 ${className || 'w-[160px] md:w-[180px]'}`}
     >
       {/* Selection Checkbox Badge */}
       {isSelectionMode && (
@@ -56,6 +93,25 @@ export function MovieCard({ item, to, className = '', isSelectionMode = false, i
           }`}>
             <Check size={14} className="stroke-[3]" />
           </div>
+        </div>
+      )}
+
+      {/* Quality & Rating Badges (Top Start when not in selection mode) */}
+      {!isSelectionMode && (resBadge || ratingVal) && (
+        <div className="absolute top-2.5 start-2.5 z-20 flex items-center gap-1 pointer-events-none">
+          {resBadge && (
+            <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold tracking-wider uppercase shadow-sm backdrop-blur-md ${
+              resBadge === '4K' ? 'bg-amber-500/90 text-black' : 'bg-black/65 text-white/90 border border-white/15'
+            }`}>
+              {resBadge}
+            </span>
+          )}
+          {ratingVal && Number(ratingVal) > 0 && (
+            <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-black/65 text-amber-400 border border-white/15 backdrop-blur-md flex items-center gap-0.5 shadow-sm">
+              <Star size={9} fill="currentColor" />
+              {ratingVal}
+            </span>
+          )}
         </div>
       )}
 
@@ -75,7 +131,6 @@ export function MovieCard({ item, to, className = '', isSelectionMode = false, i
                   currentTime: 0,
                   duration: item.duration || null
                 });
-                openFullRemote();
               }}
               className="w-7 h-7 rounded-full backdrop-blur-md flex items-center justify-center shadow-md bg-gradient-to-r from-red-600 to-rose-600 hover:brightness-110 text-white transition-all active:scale-90"
               title={isRtl ? `تشغيل فوري على ${activeRemoteSession.targetDeviceName}` : `Play on ${activeRemoteSession.targetDeviceName}`}
@@ -105,6 +160,7 @@ export function MovieCard({ item, to, className = '', isSelectionMode = false, i
             alt={item.title} 
             className="w-full h-full object-cover group-hover:brightness-105 group-hover:scale-105 transition-transform duration-250 ease-out" 
             loading="lazy" 
+            decoding="async"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-muted text-xs p-4 text-center">
@@ -137,11 +193,29 @@ export function MovieCard({ item, to, className = '', isSelectionMode = false, i
       </div>
     </Link>
   );
-}
+});
 
-export function AlbumCard({ album, to, className = '', onPlayClick, isSelectionMode = false, isSelected = false, onToggleSelect }) {
+export const AlbumCard = memo(function AlbumCard({ album, to, className = '', onPlayClick, isSelectionMode = false, isSelected = false, onToggleSelect }) {
   const { i18n } = useTranslation();
   const isArabic = i18n.language === 'ar';
+  const qc = useQueryClient();
+  const hoverTimerRef = useRef(null);
+
+  const handleMouseEnter = () => {
+    if (isSelectionMode || !album?.id) return;
+    hoverTimerRef.current = setTimeout(() => {
+      const idStr = String(album.id);
+      qc.prefetchQuery({ queryKey: ['album', idStr], queryFn: () => fetchAlbum(idStr), staleTime: 5 * 60 * 1000 });
+    }, 110);
+  };
+
+  const handleMouseLeave = () => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+  };
+
   const handleClick = (e) => {
     if (isSelectionMode && onToggleSelect) {
       e.preventDefault();
@@ -153,7 +227,9 @@ export function AlbumCard({ album, to, className = '', onPlayClick, isSelectionM
     <Link 
       to={to} 
       onClick={handleClick}
-      className={`group w-full flex flex-col p-3 rounded-[22px] transition-[transform,box-shadow,border-color] duration-160 ease-out hover:-translate-y-1.5 transform-gpu will-change-transform shadow-[0_4px_16px_-4px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)] dark:shadow-[0_8px_24px_-6px_rgba(0,0,0,0.45)] hover:shadow-[0_16px_36px_-6px_rgba(0,0,0,0.12),0_4px_12px_rgba(0,0,0,0.06)] dark:hover:shadow-[0_20px_45px_-8px_rgba(0,0,0,0.7)] relative ${
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      className={`cv-card group w-full flex flex-col p-3 rounded-[22px] transition-[transform,box-shadow,border-color] duration-160 ease-out hover:-translate-y-1.5 transform-gpu hover:will-change-transform shadow-[0_4px_16px_-4px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)] dark:shadow-[0_8px_24px_-6px_rgba(0,0,0,0.45)] hover:shadow-[0_16px_36px_-6px_rgba(0,0,0,0.12),0_4px_12px_rgba(0,0,0,0.06)] dark:hover:shadow-[0_20px_45px_-8px_rgba(0,0,0,0.7)] relative ${
         isSelected 
           ? 'bg-primaryMusic/15 border-2 border-primaryMusic shadow-lg shadow-primaryMusic/10' 
           : 'bg-white dark:bg-surface/60 backdrop-blur-sm hover:bg-slate-50 dark:hover:bg-surface/80 border border-slate-200/80 dark:border-white/10 hover:border-emerald-500/30 dark:hover:border-emerald-500/40'
@@ -176,7 +252,7 @@ export function AlbumCard({ album, to, className = '', onPlayClick, isSelectionM
       {/* Square aspect ratio with optically coherent concentric radius and subtle image outline */}
       <div className="relative aspect-square w-full rounded-2xl overflow-hidden bg-surfaceHover shadow-sm ring-1 ring-inset ring-black/5 dark:ring-white/10 group-hover:shadow-md transition-[box-shadow,transform] duration-200">
         {album.cover ? (
-          <img src={album.cover} alt={album.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-250 ease-out" loading="lazy" />
+          <img src={album.cover} alt={album.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-250 ease-out" loading="lazy" decoding="async" />
         ) : (
           <div className="w-full h-full bg-surfaceHover flex items-center justify-center text-muted">
             <Disc3 size={32} className="opacity-40 text-primaryMusic" />
@@ -210,12 +286,29 @@ export function AlbumCard({ album, to, className = '', onPlayClick, isSelectionM
       </div>
     </Link>
   );
-}
+});
 
-export function ArtistCard({ artist, to, className = '', onPlayClick, isSelectionMode = false, isSelected = false, onToggleSelect, isQuran, displayYear: overrideDisplayYear }) {
+export const ArtistCard = memo(function ArtistCard({ artist, to, className = '', onPlayClick, isSelectionMode = false, isSelected = false, onToggleSelect, isQuran, displayYear: overrideDisplayYear }) {
   const displayYear = overrideDisplayYear || artist.year || artist.maxYear || artist.minYear;
   const { i18n } = useTranslation();
   const isArabic = i18n.language === 'ar';
+  const qc = useQueryClient();
+  const hoverTimerRef = useRef(null);
+
+  const handleMouseEnter = () => {
+    if (isSelectionMode || !artist?.id) return;
+    hoverTimerRef.current = setTimeout(() => {
+      const idStr = String(artist.id);
+      qc.prefetchQuery({ queryKey: ['artist', idStr], queryFn: () => fetchArtist(idStr), staleTime: 5 * 60 * 1000 });
+    }, 110);
+  };
+
+  const handleMouseLeave = () => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+  };
   
   // Auto-detect if not explicitly passed
   const isQuranMedia = isQuran !== undefined 
@@ -237,7 +330,9 @@ export function ArtistCard({ artist, to, className = '', onPlayClick, isSelectio
     <Link 
       to={to} 
       onClick={handleClick}
-      className={`group relative w-full flex flex-col p-3 rounded-[22px] transition-[transform,box-shadow,border-color] duration-160 ease-out hover:-translate-y-1.5 transform-gpu will-change-transform shadow-[0_4px_16px_-4px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)] dark:shadow-[0_8px_24px_-6px_rgba(0,0,0,0.45)] hover:shadow-[0_16px_36px_-6px_rgba(0,0,0,0.12),0_4px_12px_rgba(0,0,0,0.06)] dark:hover:shadow-[0_20px_45px_-8px_rgba(0,0,0,0.7)] ${
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      className={`cv-card group relative w-full flex flex-col p-3 rounded-[22px] transition-[transform,box-shadow,border-color] duration-160 ease-out hover:-translate-y-1.5 transform-gpu hover:will-change-transform shadow-[0_4px_16px_-4px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)] dark:shadow-[0_8px_24px_-6px_rgba(0,0,0,0.45)] hover:shadow-[0_16px_36px_-6px_rgba(0,0,0,0.12),0_4px_12px_rgba(0,0,0,0.06)] dark:hover:shadow-[0_20px_45px_-8px_rgba(0,0,0,0.7)] ${
         isSelected 
           ? 'bg-primaryMusic/15 border-2 border-primaryMusic shadow-lg shadow-primaryMusic/10' 
           : 'bg-white dark:bg-surface/60 backdrop-blur-sm hover:bg-slate-50 dark:hover:bg-surface/80 border border-slate-200/80 dark:border-white/10 hover:border-emerald-500/30 dark:hover:border-emerald-500/40'
@@ -260,7 +355,7 @@ export function ArtistCard({ artist, to, className = '', onPlayClick, isSelectio
       {/* Square card with concentric radius and image outline */}
       <div className="relative aspect-square w-full rounded-2xl overflow-hidden bg-surfaceHover shadow-sm ring-1 ring-inset ring-black/5 dark:ring-white/10 group-hover:shadow-md transition-[box-shadow,transform] duration-200">
         {(artist.image || artist.poster) ? (
-          <img src={artist.image || artist.poster} alt={artist.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-250 ease-out" loading="lazy" />
+          <img src={artist.image || artist.poster} alt={artist.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-250 ease-out" loading="lazy" decoding="async" />
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-surface to-surfaceHover p-2">
             <div className="w-12 h-12 rounded-full bg-primaryMusic/20 border border-primaryMusic/30 flex items-center justify-center text-2xl font-bold text-primaryMusic mb-1">
@@ -306,4 +401,4 @@ export function ArtistCard({ artist, to, className = '', onPlayClick, isSelectio
       </div>
     </Link>
   );
-}
+});

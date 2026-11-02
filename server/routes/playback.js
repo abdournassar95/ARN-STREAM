@@ -1,7 +1,7 @@
 import express from 'express';
 import db from '../db.js';
 import { requireAuth } from '../services/auth.js';
-import { getContinueWatching, removePlaybackState } from '../services/playback-manager.js';
+import { getContinueWatching, getContinueListening, removePlaybackState } from '../services/playback-manager.js';
 
 const router = express.Router();
 
@@ -41,9 +41,27 @@ router.post('/', (req, res) => {
 
 router.get('/continue', (req, res) => {
   const userId = req.user.id;
-  const { limit = 15 } = req.query;
+  const { limit = 8 } = req.query;
   const list = getContinueWatching(userId, { limit: Number(limit) });
   res.json({ data: list });
+});
+
+router.get('/continue-listening', (req, res) => {
+  const userId = req.user.id;
+  const { limit = 8 } = req.query;
+  const list = getContinueListening(userId, { limit: Number(limit) });
+  res.json({ data: list });
+});
+
+router.get('/:type/:id', (req, res) => {
+  const userId = req.user.id;
+  const { type, id } = req.params;
+  const row = db.prepare(`
+    SELECT position, duration, updated_at
+    FROM playback_state
+    WHERE media_type = ? AND media_id = ? AND user_id = ?
+  `).get(type, Number(id), userId);
+  res.json({ data: row || null });
 });
 
 router.delete('/:type/:id', (req, res) => {

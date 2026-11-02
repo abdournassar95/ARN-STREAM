@@ -72,19 +72,21 @@ export const searchMetadata = (q, type) => client.get('/metadata/search', { para
 export const fetchTmdbKey = () => client.get('/metadata/tmdb-key').then(r => r.data.data);
 export const saveTmdbKey = (key) => client.post('/metadata/tmdb-key', { key }).then(r => r.data);
 export const updateMetadata = (type, id, payload) => client.put(`/metadata/${type}/${id}`, payload).then(r => r.data);
-export const updatePoster = (type, id, formDataOrUrl, imageType = 'poster') => {
+export const updatePoster = (type, id, formDataOrUrl, imageType = 'poster', extraParams = {}) => {
+  const params = new URLSearchParams({ imageType, ...extraParams });
+  const endpoint = `/metadata/${type}/${id}/poster?${params.toString()}`;
   if (typeof formDataOrUrl === 'string') {
-    return client.post(`/metadata/${type}/${id}/poster`, { imageUrl: formDataOrUrl, imageType }).then(r => r.data);
+    return client.post(endpoint, { imageUrl: formDataOrUrl, imageType, ...extraParams }).then(r => r.data);
   }
   if (formDataOrUrl instanceof FormData && !formDataOrUrl.has('imageType')) {
     formDataOrUrl.append('imageType', imageType);
   }
-  return client.post(`/metadata/${type}/${id}/poster`, formDataOrUrl).then(r => r.data);
+  return client.post(endpoint, formDataOrUrl).then(r => r.data);
 };
 export const updateSeason = (id, payload) => client.put(`/metadata/season/${id}`, payload).then(r => r.data);
 export const updateSeasonImage = (id, formDataOrUrl, imageType = 'season_poster') => updatePoster('season', id, formDataOrUrl, imageType);
 export const updateArtist = (id, payload) => client.put(`/metadata/artist/${id}`, payload).then(r => r.data);
-export const updateArtistImage = (id, formDataOrUrl, imageType = 'poster') => updatePoster('artist', id, formDataOrUrl, imageType);
+export const updateArtistImage = (id, formDataOrUrl, imageType = 'poster', extraParams = {}) => updatePoster('artist', id, formDataOrUrl, imageType, extraParams);
 export const fetchMediaImages = (type, id) => client.get(`/metadata/${type}/${id}/images`).then(r => r.data.data);
 export const setPrimaryImage = (imageId) => client.post(`/metadata/images/${imageId}/set-primary`).then(r => r.data);
 export const deleteMediaImage = (imageId) => client.delete(`/metadata/images/${imageId}`).then(r => r.data);
@@ -210,4 +212,31 @@ export const batchDeleteDatabaseRecords = (payload) => client.post('/database/ba
 export const fetchLibraryContents = (libraryId, params) => client.get(`/database/libraries/${libraryId}/contents`, { params }).then(r => r.data.data);
 export const clearLibraryContentsApi = (libraryId) => client.post(`/database/libraries/${libraryId}/clear`).then(r => r.data);
 export const createDatabaseUserApi = (payload) => client.post('/database/users', payload).then(r => r.data);
+
+// Notifications System
+export const fetchNotifications = (params) => client.get('/notifications', { params }).then(r => r.data.data);
+export const markAllNotificationsRead = () => client.post('/notifications/read-all').then(r => r.data);
+export const markNotificationRead = (id) => client.post(`/notifications/${id}/read`).then(r => r.data);
+export const deleteNotificationApi = (id) => client.delete(`/notifications/${id}`).then(r => r.data);
+export const clearAllNotificationsApi = () => client.delete('/notifications').then(r => r.data);
+
+// Library Health & Relocation
+export const fetchHealthReport = () => client.get('/database/health-report').then(r => r.data.data);
+export const checkLibraryIntegrityApi = (options = {}) => client.post('/database/check-integrity', typeof options === 'object' ? options : { libraryId: options }).then(r => r.data);
+export const detectRelocatedFilesApi = (missing, options = {}) => client.post('/database/detect-relocations', { missing, ...(typeof options === 'object' ? options : { libraryId: options }) }).then(r => r.data);
+export const applyRelocationsApi = (relocations) => client.post('/database/apply-relocations', { relocations }).then(r => r.data);
+export const pruneVerifiedMissingApi = (missing) => client.post('/database/prune-verified-missing', { missing }).then(r => r.data);
+
+// Metadata Auto-Fetcher
+export const fetchMetadataAutoFetchStatus = () => client.get('/metadata/auto-fetch/status').then(r => r.data.data);
+export const startMetadataAutoFetch = (options) => client.post('/metadata/auto-fetch/start', options).then(r => r.data);
+export const stopMetadataAutoFetch = () => client.post('/metadata/auto-fetch/stop').then(r => r.data);
+export const pauseMetadataAutoFetch = () => client.post('/metadata/auto-fetch/pause').then(r => r.data);
+export const resumeMetadataAutoFetch = () => client.post('/metadata/auto-fetch/resume').then(r => r.data);
+
+// Licensing & Copy Protection System
+export const fetchLicenseStatus = () => client.get('/license/status').then(r => r.data);
+export const activateLicenseApi = (serial) => client.post('/license/activate', { serial }).then(r => r.data);
+export const deactivateLicenseApi = () => client.post('/license/deactivate').then(r => r.data);
+
 

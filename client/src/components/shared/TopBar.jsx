@@ -22,21 +22,25 @@ import {
   QrCode,
   SlidersHorizontal,
   Cast,
-  Users
+  Users,
+  Bell
 } from 'lucide-react';
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { fetchLibraries, fetchSearchSuggestions } from '../../api/client';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { fetchLibraries, fetchSearchSuggestions, fetchLibrary } from '../../api/client';
 import client from '../../api/client';
 import { useSettingsStore } from '../../store/useSettingsStore';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useDeviceHandoffStore } from '../../store/useDeviceHandoffStore';
 import { useScanStore } from '../../store/useScanStore';
+import { useNotificationStore } from '../../store/useNotificationStore';
+import { usePlayerStore } from '../../store/usePlayerStore';
 import PredictiveSearchDropdown from './PredictiveSearchDropdown';
 import { localizeLibraryName } from '../../utils/localization';
 import UserMenu from './UserMenu';
 import ServerQrModal from './ServerQrModal';
 import JoinWatchPartyModal from './JoinWatchPartyModal';
+import NotificationCenter, { NotificationToasts } from './NotificationCenter';
 
 export default function TopBar({ variant = 'movies' }) {
   const { t, i18n } = useTranslation();
@@ -48,6 +52,7 @@ export default function TopBar({ variant = 'movies' }) {
   const [showWatchPartyModal, setShowWatchPartyModal] = useState(false);
   const { activeRemoteSession, openFullRemote, openCastModal, onlineDevices } = useDeviceHandoffStore();
   const { isScanning, progress: scanProgress, startScan } = useScanStore();
+  const { unreadCount, toggleDrawer: toggleNotificationDrawer } = useNotificationStore();
   
   const [q, setQ] = useState('');
   const [searchSuggestions, setSearchSuggestions] = useState([]);
@@ -69,7 +74,26 @@ export default function TopBar({ variant = 'movies' }) {
     queryFn: () => fetchLibraries(true) 
   });
   
-  const { theme, setTheme } = useSettingsStore();
+  const qc = useQueryClient();
+  const {
+    theme,
+    setTheme,
+    libraryPreferences = {},
+    libraryGlobalSort = 'added_at',
+    libraryGlobalOrder = 'desc',
+    setCommandPaletteOpen
+  } = useSettingsStore();
+
+  const handlePrefetchLibrary = (libId) => {
+    const prefs = libraryPreferences[libId] || {};
+    const sort = prefs.sort || libraryGlobalSort;
+    const order = prefs.order || libraryGlobalOrder;
+    qc.prefetchQuery({
+      queryKey: ['library', String(libId), sort, order, 'artists'],
+      queryFn: () => fetchLibrary(libId, { sort, order, view: 'artists', limit: 10000 }),
+      staleTime: 5 * 60 * 1000
+    });
+  };
   const isDark = theme !== 'light';
 
   const toggleTheme = () => {
@@ -165,11 +189,11 @@ export default function TopBar({ variant = 'movies' }) {
     if (path.startsWith('/live')) {
       return {
         id: 'live',
-        color: '#EF4444',
-        colorRgb: '239, 68, 68',
-        glow: 'rgba(239, 68, 68, 0.45)',
-        activePillBg: 'bg-red-600/35 border-red-400/50 shadow-red-500/20',
-        scanText: 'text-[#EF4444]',
+        color: '#8B5CF6',
+        colorRgb: '139, 92, 246',
+        glow: 'rgba(139, 92, 246, 0.45)',
+        activePillBg: 'bg-violet-600/35 border-violet-400/50 shadow-violet-500/20',
+        scanText: 'text-[#8B5CF6]',
       };
     }
 
@@ -196,17 +220,219 @@ export default function TopBar({ variant = 'movies' }) {
     });
   }, [libraries]);
 
-  // Icon resolver per library
-  const getLibIcon = (lib) => {
+  // Icon resolver per library with dynamic sizing
+  const getLibIcon = (lib, size = 18) => {
     const n = (lib.name || '').toLowerCase();
-    if (n.includes('قرآن') || n.includes('قران') || n.includes('quran')) return <BookOpen size={18} />;
-    if (n.includes('مسرح') || n.includes('play')) return <Drama size={18} />;
-    if (n.includes('وثائق') || n.includes('doc') || lib.icon === 'compass') return <Compass size={18} />;
-    if (lib.icon === 'film' || lib.type === 'movies') return <Film size={18} />;
-    if (lib.icon === 'tv' || lib.type === 'shows') return <Tv size={18} />;
-    if (lib.icon === 'music' || lib.type === 'music') return <Music size={18} />;
-    return <Folder size={18} />;
+    if (n.includes('قرآن') || n.includes('قران') || n.includes('quran')) return <BookOpen size={size} />;
+    if (n.includes('مسرح') || n.includes('play')) return <Drama size={size} />;
+    if (n.includes('وثائق') || n.includes('doc') || lib.icon === 'compass') return <Compass size={size} />;
+    if (lib.icon === 'film' || lib.type === 'movies') return <Film size={size} />;
+    if (lib.icon === 'tv' || lib.type === 'shows') return <Tv size={size} />;
+    if (lib.icon === 'music' || lib.type === 'music') return <Music size={size} />;
+    return <Folder size={size} />;
   };
+
+  // Window inner height tracking for dynamic vertical density
+  const [windowHeight, setWindowHeight] = useState(
+    typeof window !== 'undefined' ? window.innerHeight : 900
+  );
+
+  useEffect(() => {
+    let timeoutId = null;
+    const handleResize = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        setWindowHeight(window.innerHeight);
+      }, 100);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => {
+      clearTimeout(timeoutId);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
+
+  // Compute dynamic density tier strictly according to real available vertical space
+  const density = useMemo(() => {
+    // 4 fixed top-level items in middle nav: Home, Live TV, Cast, Watch Party + libraries
+    const totalItems = 4 + sortedLibraries.length;
+    
+    // Exact vertical space analysis:
+    const isBackVisible = location.pathname !== '/';
+    const hasAdmin = useAuthStore.getState().isAdmin();
+    
+    // Estimates of top & bottom sections in px:
+    // Top: Logo (~52px) + Back button (~42px if visible) + Active remote (~42px if active) + Search bar (~42px) + gaps
+    const headerEst = 52 + (isBackVisible ? 42 : 0) + (activeRemoteSession ? 42 : 0) + 42 + 8;
+    // Bottom: Scan (~40px if admin) + Phone (~40px) + Settings (~40px) + Theme (~40px) + Lang (~40px) + User (~48px) + divider & gaps
+    const footerEst = (hasAdmin ? 40 : 0) + 160 + 48 + 14;
+    const sidebarPaddingEst = 28; // top-3.5 + bottom-3.5
+    
+    const availableForNav = Math.max(160, windowHeight - sidebarPaddingEst - headerEst - footerEst);
+    const estItemHeight = availableForNav / Math.max(1, totalItems);
+
+    // Truly dynamic scaling based on real pixel budget per item
+    if (estItemHeight >= 46) {
+      return 'spacious';
+    }
+    if (estItemHeight >= 38) {
+      return 'comfortable';
+    }
+    if (estItemHeight >= 30) {
+      return 'compact';
+    }
+    if (estItemHeight >= 24) {
+      return 'dense';
+    }
+    return 'micro';
+  }, [sortedLibraries.length, windowHeight, location.pathname, activeRemoteSession]);
+
+  // Dynamic styling configurations per density tier - with enhanced prominent fonts and icons
+  const densityConfig = useMemo(() => {
+    switch (density) {
+      case 'micro':
+        return {
+          asidePadding: 'p-1',
+          navMargin: 'my-0.5',
+          navGap: 'space-y-[1.5px]',
+          itemHeight: 'h-[26px]',
+          itemRadius: 'rounded-md',
+          iconBox: 'w-7.5 h-[26px]',
+          iconSize: 14.5,
+          textSize: 'text-[10.5px] font-semibold leading-tight',
+          badgeText: 'text-[7.5px] px-1 py-0',
+          logoBox: 'w-7.5 h-7.5',
+          logoBoxClass: 'h-8',
+          logoTextSize: 'text-xs font-bold',
+          logoSubTextSize: 'text-[8px]',
+          topItemHeight: 'h-7',
+          topIconBox: 'w-7.5 h-7',
+          topIconSize: 14,
+          topTextSize: 'text-[10px] font-semibold',
+          searchInputHeight: 'h-6 text-[9.5px]',
+          bottomItemHeight: 'h-[25px]',
+          bottomRadius: 'rounded-md',
+          bottomIconBox: 'w-7.5 h-[25px]',
+          bottomIconSize: 14,
+          bottomTextSize: 'text-[10px] font-medium',
+          bottomGap: 'gap-0.5 pt-0.5',
+          userAvatarSize: 22,
+        };
+      case 'dense':
+        return {
+          asidePadding: 'p-1.5',
+          navMargin: 'my-1',
+          navGap: 'space-y-[2px]',
+          itemHeight: 'h-[30px]',
+          itemRadius: 'rounded-lg',
+          iconBox: 'w-8.5 h-[30px]',
+          iconSize: 16.5,
+          textSize: 'text-[11.5px] font-semibold leading-tight',
+          badgeText: 'text-[8.5px] px-1 py-0.2',
+          logoBox: 'w-8.5 h-8.5',
+          logoBoxClass: 'h-9',
+          logoTextSize: 'text-xs font-extrabold',
+          logoSubTextSize: 'text-[8.5px]',
+          topItemHeight: 'h-8',
+          topIconBox: 'w-8.5 h-8',
+          topIconSize: 16,
+          topTextSize: 'text-[11px] font-semibold',
+          searchInputHeight: 'h-7 text-[10.5px]',
+          bottomItemHeight: 'h-[28px]',
+          bottomRadius: 'rounded-lg',
+          bottomIconBox: 'w-8.5 h-[28px]',
+          bottomIconSize: 15.5,
+          bottomTextSize: 'text-[11px] font-medium',
+          bottomGap: 'gap-0.5 pt-1',
+          userAvatarSize: 25,
+        };
+      case 'compact':
+        return {
+          asidePadding: 'p-2',
+          navMargin: 'my-1.5',
+          navGap: 'space-y-1',
+          itemHeight: 'h-[36px]',
+          itemRadius: 'rounded-xl',
+          iconBox: 'w-9.5 h-[36px]',
+          iconSize: 18.5,
+          textSize: 'text-xs font-bold',
+          badgeText: 'text-[9.5px] px-1.5 py-0.2 font-semibold',
+          logoBox: 'w-9.5 h-9.5',
+          logoBoxClass: 'h-10',
+          logoTextSize: 'text-sm font-extrabold',
+          logoSubTextSize: 'text-[9.5px] font-semibold',
+          topItemHeight: 'h-9',
+          topIconBox: 'w-9.5 h-9',
+          topIconSize: 18,
+          topTextSize: 'text-xs font-bold',
+          searchInputHeight: 'h-8 text-xs',
+          bottomItemHeight: 'h-[32px]',
+          bottomRadius: 'rounded-xl',
+          bottomIconBox: 'w-9.5 h-[32px]',
+          bottomIconSize: 17.5,
+          bottomTextSize: 'text-xs font-semibold',
+          bottomGap: 'gap-1 pt-1',
+          userAvatarSize: 28,
+        };
+      case 'comfortable':
+        return {
+          asidePadding: 'p-2',
+          navMargin: 'my-2',
+          navGap: 'space-y-1',
+          itemHeight: 'h-10',
+          itemRadius: 'rounded-xl',
+          iconBox: 'w-10 h-10',
+          iconSize: 20.5,
+          textSize: 'text-[13.5px] font-bold',
+          badgeText: 'text-[10px] px-1.5 py-0.5 font-bold',
+          logoBox: 'w-10 h-10',
+          logoBoxClass: 'h-11',
+          logoTextSize: 'text-sm font-black',
+          logoSubTextSize: 'text-[10px] font-bold',
+          topItemHeight: 'h-10',
+          topIconBox: 'w-10 h-10',
+          topIconSize: 19.5,
+          topTextSize: 'text-[13px] font-bold',
+          searchInputHeight: 'h-8.5 text-xs',
+          bottomItemHeight: 'h-9',
+          bottomRadius: 'rounded-xl',
+          bottomIconBox: 'w-10 h-9',
+          bottomIconSize: 19,
+          bottomTextSize: 'text-xs sm:text-[13px] font-semibold',
+          bottomGap: 'gap-1 pt-1.5',
+          userAvatarSize: 30,
+        };
+      case 'spacious':
+      default:
+        return {
+          asidePadding: 'p-2.5',
+          navMargin: 'my-2.5',
+          navGap: 'space-y-1.5',
+          itemHeight: 'h-11',
+          itemRadius: 'rounded-2xl',
+          iconBox: 'w-11 h-11',
+          iconSize: 22,
+          textSize: 'text-[14.5px] font-bold',
+          badgeText: 'text-[11px] px-2 py-0.5 font-bold',
+          logoBox: 'w-11 h-11',
+          logoBoxClass: 'h-12',
+          logoTextSize: 'text-base font-black',
+          logoSubTextSize: 'text-[11px] font-bold',
+          topItemHeight: 'h-11',
+          topIconBox: 'w-11 h-11',
+          topIconSize: 21,
+          topTextSize: 'text-sm font-bold',
+          searchInputHeight: 'h-9 text-xs font-medium',
+          bottomItemHeight: 'h-10',
+          bottomRadius: 'rounded-2xl',
+          bottomIconBox: 'w-11 h-10',
+          bottomIconSize: 20.5,
+          bottomTextSize: 'text-[13.5px] font-bold',
+          bottomGap: 'gap-1.5 pt-2',
+          userAvatarSize: 34,
+        };
+    }
+  }, [density]);
 
   // Predictive search query debounce
   useEffect(() => {
@@ -226,8 +452,8 @@ export default function TopBar({ variant = 'movies' }) {
       setIsSearching(true);
       try {
         const data = await fetchSearchSuggestions(query);
-        setSearchSuggestions(data.results || []);
-        setPrediction(data.prediction || null);
+        setSearchSuggestions(data?.data || data?.results || []);
+        setPrediction(data?.prediction || null);
         setIsDropdownOpen(true);
       } catch (err) {
         console.error('Predictive search error:', err);
@@ -331,9 +557,9 @@ export default function TopBar({ variant = 'movies' }) {
       <aside
         className={`arn-sidebar hidden md:flex fixed top-3.5 bottom-3.5 h-[calc(100vh-28px)] max-h-[calc(100vh-28px)] z-[90] ${
           isRtl ? 'right-3 sm:right-4' : 'left-3 sm:left-4'
-        } w-[72px] hover:w-[250px] group/sidebar flex-col justify-between rounded-[28px] border transition-[width] duration-180 ease-out shadow-2xl backdrop-blur-2xl p-2.5 overflow-hidden will-change-[width] select-none ${
+        } w-[76px] hover:w-[280px] group/sidebar flex-col justify-between rounded-[28px] border shadow-2xl backdrop-blur-2xl overflow-hidden will-change-[width] select-none ${
           isDark ? 'text-white' : 'text-slate-800'
-        }`}
+        } ${densityConfig.asidePadding}`}
         style={{
           background: isDark
             ? `linear-gradient(180deg, rgba(${themeInfo.colorRgb}, 0.24) 0%, rgba(10, 15, 26, 0.93) 22%, rgba(4, 7, 13, 0.98) 100%)`
@@ -344,19 +570,20 @@ export default function TopBar({ variant = 'movies' }) {
           boxShadow: isDark
             ? `0 20px 50px -10px rgba(0, 0, 0, 0.85), 0 0 32px -4px ${themeInfo.glow}, inset 0 1px 1px rgba(255, 255, 255, 0.2)`
             : `0 15px 40px -8px rgba(0, 0, 0, 0.12), 0 0 24px -4px rgba(${themeInfo.colorRgb}, 0.25), inset 0 1px 1px rgba(255, 255, 255, 0.95)`,
+          transition: 'width 420ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 420ms cubic-bezier(0.16, 1, 0.3, 1), border-color 350ms ease, background 350ms ease',
         }}
       >
         {/* Top Section: Brand Header, Back Button, Search */}
-        <div className="flex flex-col gap-1.5 shrink-0 w-full">
-          {/* 1. Brand Logo & Title (Always centered in collapsed mode, reveals title on hover) */}
+        <div className="flex flex-col gap-1 shrink-0 w-full">
+          {/* 1. Brand Logo & Title (Always centered in collapsed mode, reveals title on hover smoothly) */}
           <Link 
             to="/" 
-            className="flex items-center h-12 rounded-2xl group/brand w-full overflow-hidden transition-all duration-180 hover:bg-white/10 dark:hover:bg-white/10"
+            className={`flex items-center ${densityConfig.logoBoxClass} ${densityConfig.itemRadius} group/brand w-full overflow-hidden transition-all duration-350 ease-out hover:bg-white/10 dark:hover:bg-white/10`}
             title="ARN STREAM"
           >
             <div 
               style={{ boxShadow: `0 0 14px rgba(${themeInfo.colorRgb}, ${isDark ? '0.5' : '0.3'})` }}
-              className="w-10 h-10 rounded-2xl overflow-hidden p-0.5 bg-gradient-to-tr from-white/20 via-white/50 to-white/80 shadow-lg flex-shrink-0 mx-auto group-hover/sidebar:mx-0 group-hover/brand:scale-105 transition-all duration-180"
+              className={`${densityConfig.logoBox} ${densityConfig.itemRadius} overflow-hidden p-0.5 bg-gradient-to-tr from-white/20 via-white/50 to-white/80 shadow-lg flex-shrink-0 mx-auto group-hover/sidebar:mx-0 group-hover/brand:scale-105 transition-all duration-350 ease-out`}
             >
               <img 
                 src="/favicon.jpg" 
@@ -364,13 +591,13 @@ export default function TopBar({ variant = 'movies' }) {
                 className="w-full h-full rounded-xl object-cover" 
               />
             </div>
-            <div className="opacity-0 w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:w-auto transition-all duration-180 ease-out flex flex-col leading-tight whitespace-nowrap overflow-hidden ms-2.5">
-              <span className={`font-black text-sm tracking-tight transition-colors ${
+            <div className="opacity-0 max-w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:max-w-[195px] transition-all duration-350 ease-out flex flex-col leading-tight whitespace-nowrap overflow-hidden ms-2">
+              <span className={`font-black ${densityConfig.logoTextSize} tracking-tight transition-colors ${
                 isDark ? 'text-white group-hover/brand:text-amber-300' : 'text-slate-900 group-hover/brand:text-amber-600'
               }`}>
                 ARN STREAM
               </span>
-              <span className={`text-[10px] font-bold tracking-wider uppercase ${
+              <span className={`${densityConfig.logoSubTextSize} font-bold tracking-wider uppercase ${
                 isDark ? 'text-white/60' : 'text-slate-500'
               }`}>
                 Media Server
@@ -383,13 +610,13 @@ export default function TopBar({ variant = 'movies' }) {
             <button
               type="button"
               onClick={openFullRemote}
-              className="flex items-center h-11 rounded-2xl transition-all duration-180 w-full group/remote shadow-lg bg-gradient-to-r from-red-600/25 to-rose-600/25 border border-rose-500/40 text-white animate-pulse"
+              className={`flex items-center ${densityConfig.topItemHeight} ${densityConfig.itemRadius} transition-all duration-350 ease-out w-full group/remote shadow-lg bg-gradient-to-r from-red-600/25 to-rose-600/25 border border-rose-500/40 text-white animate-pulse`}
               title={isRtl ? `التحكم في ${activeRemoteSession.targetDeviceName}` : `Control ${activeRemoteSession.targetDeviceName}`}
             >
-              <div className="w-11 h-11 flex items-center justify-center flex-shrink-0 mx-auto group-hover/sidebar:mx-0 text-rose-400">
-                <SlidersHorizontal size={18} />
+              <div className={`${densityConfig.topIconBox} flex items-center justify-center flex-shrink-0 mx-auto group-hover/sidebar:mx-0 text-rose-400 transition-all duration-350 ease-out`}>
+                <SlidersHorizontal size={densityConfig.topIconSize} />
               </div>
-              <span className="opacity-0 w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:w-auto transition-all duration-180 ease-out font-bold text-xs truncate ms-1.5 whitespace-nowrap overflow-hidden text-rose-300">
+              <span className={`opacity-0 max-w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:max-w-[195px] transition-all duration-350 ease-out font-bold ${densityConfig.topTextSize} truncate ms-1.5 whitespace-nowrap overflow-hidden text-rose-300`}>
                 {activeRemoteSession.targetDeviceName}
               </span>
             </button>
@@ -400,17 +627,17 @@ export default function TopBar({ variant = 'movies' }) {
             <button
               type="button"
               onClick={() => navigate(-1)}
-              className={`flex items-center h-11 rounded-2xl transition-all duration-180 w-full group/back shadow-sm ${
+              className={`flex items-center ${densityConfig.topItemHeight} ${densityConfig.itemRadius} transition-all duration-350 ease-out w-full group/back shadow-sm ${
                 isDark
                   ? 'bg-white/10 hover:bg-white/20 border border-white/15 text-white/90 hover:text-white'
                   : 'bg-black/5 hover:bg-black/10 border border-black/10 text-slate-700 hover:text-slate-950'
               }`}
               title={isRtl ? 'رجوع للخلف' : 'Go Back'}
             >
-              <div className="w-11 h-11 flex items-center justify-center flex-shrink-0 mx-auto group-hover/sidebar:mx-0">
-                {isRtl ? <ArrowRight size={18} /> : <ArrowLeft size={18} />}
+              <div className={`${densityConfig.topIconBox} flex items-center justify-center flex-shrink-0 mx-auto group-hover/sidebar:mx-0 transition-all duration-350 ease-out`}>
+                {isRtl ? <ArrowRight size={densityConfig.topIconSize} /> : <ArrowLeft size={densityConfig.topIconSize} />}
               </div>
-              <span className="opacity-0 w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:w-auto transition-all duration-180 ease-out font-bold text-xs sm:text-sm truncate ms-1.5 whitespace-nowrap overflow-hidden">
+              <span className={`opacity-0 max-w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:max-w-[195px] transition-all duration-350 ease-out font-bold ${densityConfig.topTextSize} truncate ms-1.5 whitespace-nowrap overflow-hidden`}>
                 {isRtl ? 'رجوع للخلف' : 'Go Back'}
               </span>
             </button>
@@ -421,18 +648,18 @@ export default function TopBar({ variant = 'movies' }) {
             <form onSubmit={handleSearch} className="flex items-center relative">
               <button
                 type="button"
-                onClick={() => searchInputRef.current?.focus()}
-                className={`w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 transition mx-auto group-hover/sidebar:mx-0 ${
+                onClick={() => setCommandPaletteOpen(true)}
+                className={`${densityConfig.topIconBox} ${densityConfig.itemRadius} flex items-center justify-center flex-shrink-0 transition-all duration-350 ease-out mx-auto group-hover/sidebar:mx-0 ${
                   isDark 
                     ? 'text-white/70 hover:text-white hover:bg-white/10' 
                     : 'text-slate-600 hover:text-slate-950 hover:bg-black/5'
                 }`}
                 title={isRtl ? 'بحث' : 'Search'}
               >
-                <Search size={18} />
+                <Search size={densityConfig.topIconSize} />
               </button>
 
-              <div className="opacity-0 w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:w-full transition-all duration-180 ease-out overflow-hidden flex items-center pe-1">
+              <div className="opacity-0 max-w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:max-w-full transition-all duration-350 ease-out overflow-hidden flex items-center pe-1">
                 <input
                   ref={searchInputRef}
                   value={q}
@@ -440,7 +667,7 @@ export default function TopBar({ variant = 'movies' }) {
                   onFocus={() => { if (q.trim()) setIsDropdownOpen(true); }}
                   onKeyDown={handleKeyDown}
                   placeholder={isRtl ? 'بحث...' : t('actions.searchPlaceholder')}
-                  className={`w-full h-9 rounded-xl border px-3 text-xs focus:outline-none transition-all shadow-inner ${
+                  className={`w-full ${densityConfig.searchInputHeight} rounded-xl border px-2.5 focus:outline-none transition-all shadow-inner ${
                     isDark 
                       ? 'bg-black/40 text-white border-white/15 placeholder:text-white/40 focus:border-white/40' 
                       : 'bg-black/[0.04] text-slate-900 border-black/10 placeholder:text-slate-400 focus:border-black/30'
@@ -482,12 +709,12 @@ export default function TopBar({ variant = 'movies' }) {
           </div>
         </div>
 
-        {/* Middle Navigation Section (Scrollable with icons & hover labels) */}
-        <nav className="flex-1 my-3 overflow-y-auto overflow-x-hidden scrollbar-none space-y-1.5 pe-0.5">
+        {/* Middle Navigation Section (Scrollable with dynamic density sizes & smooth transitions) */}
+        <nav className={`flex-1 ${densityConfig.navMargin} overflow-y-auto overflow-x-hidden scrollbar-none ${densityConfig.navGap} pe-0.5`}>
           {/* 1. الرئيسية (Home) */}
           <Link
             to="/"
-            className={`flex items-center h-11 px-1 rounded-2xl transition-all duration-200 relative group/nav ${
+            className={`flex items-center ${densityConfig.itemHeight} px-1 ${densityConfig.itemRadius} transition-all duration-350 ease-out relative group/nav ${
               location.pathname === '/' 
                 ? (isDark 
                     ? 'bg-white/20 text-white font-bold shadow-md border border-white/25 backdrop-blur-md' 
@@ -498,38 +725,41 @@ export default function TopBar({ variant = 'movies' }) {
             }`}
             title={t('common.home')}
           >
-            <div className="w-11 h-11 flex items-center justify-center flex-shrink-0 mx-auto group-hover/sidebar:mx-0">
-              <Home size={19} />
+            <div className={`${densityConfig.iconBox} flex items-center justify-center flex-shrink-0 mx-auto group-hover/sidebar:mx-0 transition-all duration-350 ease-out`}>
+              <Home size={densityConfig.iconSize} />
             </div>
-            <span className="opacity-0 w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:w-auto transition-all duration-200 font-semibold text-xs sm:text-sm truncate ms-1.5 whitespace-nowrap overflow-hidden">
+            <span className={`opacity-0 max-w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:max-w-[195px] transition-all duration-350 ease-out font-semibold ${densityConfig.textSize} truncate ms-1.5 whitespace-nowrap overflow-hidden`}>
               {t('common.home')}
             </span>
           </Link>
 
-          {/* 2. البث المباشر (Live TV with red dot) */}
+          {/* 2. البث المباشر (Live TV with beIN Purple dot) */}
           <Link
             to="/live"
-            className={`flex items-center h-11 px-1 rounded-2xl transition-all duration-200 relative group/nav ${
+            onClick={() => {
+              usePlayerStore.getState().stopMusicForVideo();
+            }}
+            className={`flex items-center ${densityConfig.itemHeight} px-1 ${densityConfig.itemRadius} transition-all duration-350 ease-out relative group/nav ${
               location.pathname === '/live' 
                 ? (isDark 
-                    ? 'bg-red-600/35 text-white font-bold shadow-md border border-red-400/50 shadow-red-500/20 backdrop-blur-md' 
-                    : 'bg-red-50 text-red-600 font-bold shadow-sm border border-red-200')
+                    ? 'bg-violet-600/35 text-white font-bold shadow-md border border-violet-400/50 shadow-violet-500/20 backdrop-blur-md' 
+                    : 'bg-violet-50 text-violet-600 font-bold shadow-sm border border-violet-200')
                 : (isDark 
                     ? 'text-white/75 hover:text-white hover:bg-white/10' 
                     : 'text-slate-600 hover:text-slate-950 hover:bg-black/5')
             }`}
             title={t('common.liveTv')}
           >
-            <div className="w-11 h-11 flex items-center justify-center flex-shrink-0 relative mx-auto group-hover/sidebar:mx-0">
-              <Tv size={19} className={location.pathname === '/live' ? 'text-red-400' : ''} />
-              <span className="absolute top-2.5 end-2.5 flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+            <div className={`${densityConfig.iconBox} flex items-center justify-center flex-shrink-0 relative mx-auto group-hover/sidebar:mx-0 transition-all duration-350 ease-out`}>
+              <Tv size={densityConfig.iconSize} className={location.pathname === '/live' ? 'text-violet-400' : ''} />
+              <span className="absolute top-1.5 end-1.5 flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-violet-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-violet-500"></span>
               </span>
             </div>
-            <span className="opacity-0 w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:w-auto transition-all duration-200 font-semibold text-xs sm:text-sm truncate ms-1.5 whitespace-nowrap overflow-hidden flex items-center gap-1.5">
+            <span className={`opacity-0 max-w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:max-w-[195px] transition-all duration-350 ease-out font-semibold ${densityConfig.textSize} truncate ms-1.5 whitespace-nowrap overflow-hidden flex items-center gap-1.5`}>
               <span>{t('common.liveTv')}</span>
-              <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-red-600 text-white shadow-sm">
+              <span className={`px-1.5 py-0.2 rounded text-[8.5px] font-black uppercase tracking-wider bg-[#7c3aed] text-white shadow-sm`}>
                 LIVE
               </span>
             </span>
@@ -545,7 +775,7 @@ export default function TopBar({ variant = 'movies' }) {
                 openCastModal(null);
               }
             }}
-            className={`flex items-center h-11 px-1 rounded-2xl transition-all duration-200 relative group/nav w-full ${
+            className={`flex items-center ${densityConfig.itemHeight} px-1 ${densityConfig.itemRadius} transition-all duration-350 ease-out relative group/nav w-full ${
               activeRemoteSession
                 ? 'bg-gradient-to-r from-rose-600/30 to-red-600/30 text-rose-300 font-bold border border-rose-500/40 shadow-lg shadow-rose-900/20 animate-pulse'
                 : (isDark 
@@ -556,32 +786,32 @@ export default function TopBar({ variant = 'movies' }) {
               ? (isRtl ? `التحكم في ${activeRemoteSession.targetDeviceName}` : `Control ${activeRemoteSession.targetDeviceName}`)
               : (isRtl ? 'البث والتحكم الكامل في الأجهزة' : 'Cast & Remote Control')}
           >
-            <div className="w-11 h-11 flex items-center justify-center flex-shrink-0 relative mx-auto group-hover/sidebar:mx-0">
-              <Cast size={19} className={activeRemoteSession ? 'text-rose-400' : 'text-emerald-400'} />
+            <div className={`${densityConfig.iconBox} flex items-center justify-center flex-shrink-0 relative mx-auto group-hover/sidebar:mx-0 transition-all duration-350 ease-out`}>
+              <Cast size={densityConfig.iconSize} className={activeRemoteSession ? 'text-rose-400' : 'text-emerald-400'} />
               {activeRemoteSession ? (
-                <span className="absolute top-2.5 end-2.5 flex h-2 w-2">
+                <span className="absolute top-1.5 end-1.5 flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
                 </span>
               ) : (
                 onlineDevices?.length > 1 && (
-                  <span className="absolute top-2.5 end-2.5 flex h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-sm" />
+                  <span className="absolute top-1.5 end-1.5 flex h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-sm" />
                 )
               )}
             </div>
-            <span className="opacity-0 w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:w-auto transition-all duration-200 font-semibold text-xs sm:text-sm truncate ms-1.5 whitespace-nowrap overflow-hidden flex items-center gap-1.5">
+            <span className={`opacity-0 max-w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:max-w-[195px] transition-all duration-350 ease-out font-semibold ${densityConfig.textSize} truncate ms-1.5 whitespace-nowrap overflow-hidden flex items-center gap-1.5`}>
               <span>
                 {activeRemoteSession
                   ? (isRtl ? `التحكم: ${activeRemoteSession.targetDeviceName}` : `Remote: ${activeRemoteSession.targetDeviceName}`)
                   : (isRtl ? 'بث وتحكم الأجهزة' : 'Cast & Remote')}
               </span>
               {activeRemoteSession ? (
-                <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-rose-600 text-white shadow-sm">
+                <span className="px-1.5 py-0.2 rounded text-[8.5px] font-black uppercase tracking-wider bg-rose-600 text-white shadow-sm">
                   ACTIVE
                 </span>
               ) : (
                 onlineDevices?.length > 1 && (
-                  <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                  <span className="px-1.5 py-0.2 rounded-full text-[8.5px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                     {onlineDevices.length - 1}
                   </span>
                 )
@@ -593,32 +823,33 @@ export default function TopBar({ variant = 'movies' }) {
           <button
             type="button"
             onClick={() => setShowWatchPartyModal(true)}
-            className={`flex items-center h-11 px-1 rounded-2xl transition-all duration-200 relative group/nav w-full ${
+            className={`flex items-center ${densityConfig.itemHeight} px-1 ${densityConfig.itemRadius} transition-all duration-350 ease-out relative group/nav w-full ${
               isDark 
                 ? 'text-white/75 hover:text-white hover:bg-white/10' 
                 : 'text-slate-600 hover:text-slate-950 hover:bg-black/5'
             }`}
             title={isRtl ? 'المشاهدة الجماعية (Watch Party)' : 'Watch Party (SyncPlay)'}
           >
-            <div className="w-11 h-11 flex items-center justify-center flex-shrink-0 relative mx-auto group-hover/sidebar:mx-0">
-              <Users size={19} className="text-sky-400 group-hover/sidebar:scale-110 transition-transform" />
+            <div className={`${densityConfig.iconBox} flex items-center justify-center flex-shrink-0 relative mx-auto group-hover/sidebar:mx-0 transition-all duration-350 ease-out`}>
+              <Users size={densityConfig.iconSize} className="text-sky-400 group-hover/sidebar:scale-110 transition-transform" />
             </div>
-            <span className="opacity-0 w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:w-auto transition-all duration-200 font-semibold text-xs sm:text-sm truncate ms-1.5 whitespace-nowrap overflow-hidden flex items-center gap-1.5">
+            <span className={`opacity-0 max-w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:max-w-[195px] transition-all duration-350 ease-out font-semibold ${densityConfig.textSize} truncate ms-1.5 whitespace-nowrap overflow-hidden flex items-center gap-1.5`}>
               <span>{isRtl ? 'المشاهدة الجماعية' : 'Watch Party'}</span>
-              <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-sky-500/20 text-sky-400 border border-sky-500/30">
+              <span className="px-1.5 py-0.2 rounded text-[8.5px] font-black uppercase tracking-wider bg-sky-500/20 text-sky-400 border border-sky-500/30">
                 SYNC
               </span>
             </span>
           </button>
 
-          {/* 4. All Dynamic Libraries */}
+          {/* Dynamic Libraries with Auto-Compact Sizing */}
           {sortedLibraries.map(lib => {
             const isLibActive = location.pathname === `/library/${lib.id}`;
             return (
               <Link
                 key={lib.id}
                 to={`/library/${lib.id}`}
-                className={`flex items-center h-11 px-1 rounded-2xl transition-all duration-200 relative group/nav ${
+                onMouseEnter={() => handlePrefetchLibrary(lib.id)}
+                className={`flex items-center ${densityConfig.itemHeight} px-1 ${densityConfig.itemRadius} transition-all duration-350 ease-out relative group/nav ${
                   isLibActive
                     ? (isDark 
                         ? 'bg-white/25 text-white font-bold shadow-md border border-white/30 backdrop-blur-md' 
@@ -629,14 +860,14 @@ export default function TopBar({ variant = 'movies' }) {
                 }`}
                 title={localizeLibraryName(lib.name, isRtl)}
               >
-                <div className="w-11 h-11 flex items-center justify-center flex-shrink-0 mx-auto group-hover/sidebar:mx-0">
-                  {getLibIcon(lib)}
+                <div className={`${densityConfig.iconBox} flex items-center justify-center flex-shrink-0 mx-auto group-hover/sidebar:mx-0 transition-all duration-350 ease-out`}>
+                  {getLibIcon(lib, densityConfig.iconSize)}
                 </div>
-                <span className="opacity-0 w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:w-auto transition-all duration-200 font-semibold text-xs sm:text-sm truncate ms-1.5 whitespace-nowrap overflow-hidden">
+                <span className={`opacity-0 max-w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:max-w-[185px] transition-all duration-350 ease-out font-semibold ${densityConfig.textSize} truncate ms-1.5 whitespace-nowrap overflow-hidden`}>
                   {localizeLibraryName(lib.name, isRtl)}
                 </span>
                 {lib.media_count !== undefined && (
-                  <span className="opacity-0 w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:w-auto ms-auto me-2 text-[10px] px-1.5 py-0.5 rounded-full bg-white/10 text-white/70 font-semibold">
+                  <span className={`opacity-0 max-w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:max-w-[60px] transition-all duration-350 ease-out ms-auto me-1.5 rounded-full bg-white/10 text-white/70 font-semibold whitespace-nowrap overflow-hidden ${densityConfig.badgeText}`}>
                     {lib.media_count}
                   </span>
                 )}
@@ -646,24 +877,50 @@ export default function TopBar({ variant = 'movies' }) {
         </nav>
 
         {/* Bottom Section: Utility Actions & User Menu */}
-        <div className="flex flex-col gap-1.5 pt-2 border-t border-white/10 shrink-0">
+        <div className={`flex flex-col ${densityConfig.bottomGap} border-t border-white/10 shrink-0`}>
+          {/* Notifications Center Bell */}
+          <button
+            id="topbar-notification-bell"
+            type="button"
+            onClick={toggleNotificationDrawer}
+            className={`flex items-center ${densityConfig.bottomItemHeight} px-1 ${densityConfig.bottomRadius} transition-all duration-350 ease-out w-full relative ${
+              isDark ? 'hover:bg-white/10 text-cyan-300' : 'hover:bg-black/5 text-cyan-700'
+            }`}
+            title={isRtl ? 'مركز الإشعارات اللحظية' : 'Notifications'}
+          >
+            <div className={`${densityConfig.bottomIconBox} flex items-center justify-center flex-shrink-0 mx-auto group-hover/sidebar:mx-0 transition-all duration-350 ease-out relative`}>
+              <Bell size={densityConfig.bottomIconSize} />
+              {unreadCount > 0 && (
+                <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-cyan-400 border-2 border-slate-950 shadow-[0_0_8px_rgba(34,211,238,0.9)] animate-pulse" />
+              )}
+            </div>
+            <span className={`opacity-0 max-w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:max-w-[195px] transition-all duration-350 ease-out ${densityConfig.bottomTextSize} font-bold truncate ms-1.5 whitespace-nowrap overflow-hidden flex items-center justify-between w-full pe-2`}>
+              <span>{isRtl ? 'الإشعارات' : 'Notifications'}</span>
+              {unreadCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-cyan-500 text-slate-950">
+                  {unreadCount}
+                </span>
+              )}
+            </span>
+          </button>
+
           {/* Scan Library Button */}
           {useAuthStore.getState().isAdmin() && (
             <button
               type="button"
               onClick={handleScan}
               disabled={isScanning}
-              className={`flex items-center h-10 px-1 rounded-2xl transition w-full ${
+              className={`flex items-center ${densityConfig.bottomItemHeight} px-1 ${densityConfig.bottomRadius} transition-all duration-350 ease-out w-full ${
                 isDark 
                   ? (isScanning ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'hover:bg-white/10 text-amber-300') 
                   : (isScanning ? 'bg-emerald-500/20 text-emerald-800 border border-emerald-500/30' : 'hover:bg-black/5 text-amber-600')
               }`}
               title={isRtl ? 'فحص ومزامنة المكتبة' : 'Scan Library'}
             >
-              <div className="w-11 h-10 flex items-center justify-center flex-shrink-0 mx-auto group-hover/sidebar:mx-0">
-                <Scan size={18} className={isScanning ? 'animate-spin text-emerald-400' : ''} />
+              <div className={`${densityConfig.bottomIconBox} flex items-center justify-center flex-shrink-0 mx-auto group-hover/sidebar:mx-0 transition-all duration-350 ease-out`}>
+                <Scan size={densityConfig.bottomIconSize} className={isScanning ? 'animate-spin text-emerald-400' : ''} />
               </div>
-              <span className="opacity-0 w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:w-auto transition-all duration-200 text-xs font-bold truncate ms-1.5 whitespace-nowrap overflow-hidden">
+              <span className={`opacity-0 max-w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:max-w-[195px] transition-all duration-350 ease-out ${densityConfig.bottomTextSize} font-bold truncate ms-1.5 whitespace-nowrap overflow-hidden`}>
                 {isScanning 
                   ? (isRtl ? `جاري الفحص (${scanProgress}%)` : `Scanning (${scanProgress}%)`) 
                   : (isRtl ? 'فحص المكتبة' : t('actions.scan'))}
@@ -675,15 +932,15 @@ export default function TopBar({ variant = 'movies' }) {
           <button
             type="button"
             onClick={() => setShowQrModal(true)}
-            className={`flex items-center h-10 px-1 rounded-2xl transition w-full ${
+            className={`flex items-center ${densityConfig.bottomItemHeight} px-1 ${densityConfig.bottomRadius} transition-all duration-350 ease-out w-full ${
               isDark ? 'hover:bg-white/10 text-emerald-400' : 'hover:bg-black/5 text-emerald-600'
             }`}
             title={isRtl ? 'ربط الهاتف عبر QR Code' : 'Connect Mobile via QR Code'}
           >
-            <div className="w-11 h-10 flex items-center justify-center flex-shrink-0 mx-auto group-hover/sidebar:mx-0">
-              <QrCode size={18} />
+            <div className={`${densityConfig.bottomIconBox} flex items-center justify-center flex-shrink-0 mx-auto group-hover/sidebar:mx-0 transition-all duration-350 ease-out`}>
+              <QrCode size={densityConfig.bottomIconSize} />
             </div>
-            <span className="opacity-0 w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:w-auto transition-all duration-200 text-xs font-semibold truncate ms-1.5 whitespace-nowrap overflow-hidden">
+            <span className={`opacity-0 max-w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:max-w-[195px] transition-all duration-350 ease-out ${densityConfig.bottomTextSize} font-semibold truncate ms-1.5 whitespace-nowrap overflow-hidden`}>
               {isRtl ? 'ربط الهاتف' : 'Connect Phone'}
             </span>
           </button>
@@ -691,15 +948,15 @@ export default function TopBar({ variant = 'movies' }) {
           {/* Settings / Dashboard */}
           <Link
             to="/dashboard?tab=general"
-            className={`flex items-center h-10 px-1 rounded-2xl transition w-full ${
+            className={`flex items-center ${densityConfig.bottomItemHeight} px-1 ${densityConfig.bottomRadius} transition-all duration-350 ease-out w-full ${
               isDark ? 'hover:bg-white/10 text-white/80 hover:text-white' : 'hover:bg-black/5 text-slate-700'
             }`}
             title={t('common.settings')}
           >
-            <div className="w-11 h-10 flex items-center justify-center flex-shrink-0 mx-auto group-hover/sidebar:mx-0">
-              <Settings size={18} />
+            <div className={`${densityConfig.bottomIconBox} flex items-center justify-center flex-shrink-0 mx-auto group-hover/sidebar:mx-0 transition-all duration-350 ease-out`}>
+              <Settings size={densityConfig.bottomIconSize} />
             </div>
-            <span className="opacity-0 w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:w-auto transition-all duration-200 text-xs font-semibold truncate ms-1.5 whitespace-nowrap overflow-hidden">
+            <span className={`opacity-0 max-w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:max-w-[195px] transition-all duration-350 ease-out ${densityConfig.bottomTextSize} font-semibold truncate ms-1.5 whitespace-nowrap overflow-hidden`}>
               {t('common.settings')}
             </span>
           </Link>
@@ -708,15 +965,15 @@ export default function TopBar({ variant = 'movies' }) {
           <button
             type="button"
             onClick={toggleTheme}
-            className={`flex items-center h-10 px-1 rounded-2xl transition w-full ${
+            className={`flex items-center ${densityConfig.bottomItemHeight} px-1 ${densityConfig.bottomRadius} transition-all duration-350 ease-out w-full ${
               isDark ? 'hover:bg-white/10 text-amber-300' : 'hover:bg-black/5 text-amber-600'
             }`}
             title={isDark ? (isRtl ? 'الوضع النهاري' : 'Light Mode') : (isRtl ? 'الوضع الليلي' : 'Dark Mode')}
           >
-            <div className="w-11 h-10 flex items-center justify-center flex-shrink-0 mx-auto group-hover/sidebar:mx-0">
-              {isDark ? <Sun size={18} /> : <Moon size={18} />}
+            <div className={`${densityConfig.bottomIconBox} flex items-center justify-center flex-shrink-0 mx-auto group-hover/sidebar:mx-0 transition-all duration-350 ease-out`}>
+              {isDark ? <Sun size={densityConfig.bottomIconSize} /> : <Moon size={densityConfig.bottomIconSize} />}
             </div>
-            <span className="opacity-0 w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:w-auto transition-all duration-200 text-xs font-semibold truncate ms-1.5 whitespace-nowrap overflow-hidden">
+            <span className={`opacity-0 max-w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:max-w-[195px] transition-all duration-350 ease-out ${densityConfig.bottomTextSize} font-semibold truncate ms-1.5 whitespace-nowrap overflow-hidden`}>
               {isDark ? (isRtl ? 'الوضع النهاري' : 'Light Mode') : (isRtl ? 'الوضع الليلي' : 'Dark Mode')}
             </span>
           </button>
@@ -725,24 +982,24 @@ export default function TopBar({ variant = 'movies' }) {
           <button
             type="button"
             onClick={toggleLang}
-            className={`flex items-center h-10 px-1 rounded-2xl transition w-full ${
+            className={`flex items-center ${densityConfig.bottomItemHeight} px-1 ${densityConfig.bottomRadius} transition-all duration-350 ease-out w-full ${
               isDark ? 'hover:bg-white/10 text-cyan-300' : 'hover:bg-black/5 text-cyan-700'
             }`}
             title={isRtl ? 'Switch to English' : 'التحويل إلى العربية'}
           >
-            <div className="w-11 h-10 flex items-center justify-center flex-shrink-0 mx-auto group-hover/sidebar:mx-0 font-bold text-xs">
+            <div className={`${densityConfig.bottomIconBox} flex items-center justify-center flex-shrink-0 mx-auto group-hover/sidebar:mx-0 font-bold text-xs transition-all duration-350 ease-out`}>
               <span className="px-1.5 py-0.5 rounded-lg border border-current text-[10px] leading-tight">
                 {i18n.language === 'ar' ? 'EN' : 'ع'}
               </span>
             </div>
-            <span className="opacity-0 w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:w-auto transition-all duration-200 text-xs font-semibold truncate ms-1.5 whitespace-nowrap overflow-hidden">
+            <span className={`opacity-0 max-w-0 group-hover/sidebar:opacity-100 group-hover/sidebar:max-w-[195px] transition-all duration-350 ease-out ${densityConfig.bottomTextSize} font-semibold truncate ms-1.5 whitespace-nowrap overflow-hidden`}>
               {i18n.language === 'ar' ? 'English' : 'العربية'}
             </span>
           </button>
 
           {/* User Menu Avatar */}
           <div className="pt-0.5 w-full">
-            <UserMenu isSidebar={true} />
+            <UserMenu isSidebar={true} avatarSize={densityConfig.userAvatarSize} density={density} />
           </div>
         </div>
       </aside>
@@ -862,6 +1119,20 @@ export default function TopBar({ variant = 'movies' }) {
                   <Search size={16} />
                 </button>
 
+                <button
+                  type="button"
+                  onClick={toggleNotificationDrawer}
+                  className={`w-8 h-8 rounded-full flex items-center justify-center transition relative ${
+                    isDark ? 'bg-white/10 text-cyan-300' : 'bg-black/5 text-cyan-700'
+                  }`}
+                  title={isRtl ? 'الإشعارات' : 'Notifications'}
+                >
+                  <Bell size={15} />
+                  {unreadCount > 0 && (
+                    <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_6px_rgba(34,211,238,0.9)] animate-pulse" />
+                  )}
+                </button>
+
                 <UserMenu />
               </div>
             </div>
@@ -978,18 +1249,21 @@ export default function TopBar({ variant = 'movies' }) {
                 {/* البث المباشر */}
                 <Link
                   to="/live"
-                  onClick={() => setMobileMenuOpen(false)}
+                  onClick={() => {
+                    usePlayerStore.getState().stopMusicForVideo();
+                    setMobileMenuOpen(false);
+                  }}
                   className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition ${
                     location.pathname === '/live' 
-                      ? (isDark ? 'bg-red-600/35 text-white font-bold shadow-md border border-red-500/30' : 'bg-red-50 text-red-600 font-bold shadow-sm border border-red-200')
+                      ? (isDark ? 'bg-violet-600/35 text-white font-bold shadow-md border border-violet-500/30' : 'bg-violet-50 text-violet-600 font-bold shadow-sm border border-violet-200')
                       : (isDark ? 'text-white/80 hover:bg-white/10' : 'text-slate-600 hover:bg-black/5')
                   }`}
                 >
                   <div className="flex items-center gap-3">
-                    <Tv size={18} className={location.pathname === '/live' ? 'text-red-400' : ''} /> 
+                    <Tv size={18} className={location.pathname === '/live' ? 'text-violet-400' : ''} /> 
                     <span>{t('common.liveTv')}</span>
                   </div>
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-red-600 text-white shadow-sm flex items-center gap-1">
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-[#7c3aed] text-white shadow-sm flex items-center gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
                     LIVE
                   </span>
@@ -1164,6 +1438,10 @@ export default function TopBar({ variant = 'movies' }) {
         isOpen={showWatchPartyModal}
         onClose={() => setShowWatchPartyModal(false)}
       />
+
+      {/* Global Notification Center & Toasts */}
+      <NotificationCenter />
+      <NotificationToasts />
     </>
   );
 }

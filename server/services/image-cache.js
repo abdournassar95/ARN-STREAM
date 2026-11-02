@@ -133,9 +133,9 @@ export async function processAndCacheImage(sourcePath, mediaType, mediaId, image
       // │ Album cover      │ 1:1 ★     │ 500      │ 300     │
       // │ Artist photo     │ 1:1 ★     │ 500      │ 300     │
       // └──────────────────┴───────────┴──────────┴─────────┘
-      const isPoster = imageType === 'poster' || imageType === 'season_poster';
-      const isSquare = imageType === 'album_cover' || mediaType === 'artist';
+      const isPoster = imageType === 'poster' || imageType === 'season_poster' || imageType === 'avatar';
       const isBackdrop = imageType === 'backdrop' || imageType === 'fanart' || imageType === 'background';
+      const isSquare = imageType === 'album_cover' || (mediaType === 'artist' && !isBackdrop);
 
       let maxWidth, thumbWidth, fullHeight, thumbHeight;
       if (isSquare) {
@@ -372,3 +372,117 @@ export function getImageCacheStats() {
     maxSize: imageBufferCache.maxSize
   };
 }
+
+/**
+ * Automatically clean up orphan images from disk and database:
+ * 1. Removes images whose parent media item was deleted from DB.
+ * 2. Removes physical cache files that have no matching record in images table.
+ */
+export function cleanupOrphanImageFiles() {
+  const stats = {
+    deletedDbRecords: 0,
+    deletedFiles: 0,
+    freedBytes: 0,
+    errors: []
+  };
+
+  try {
+    // 1. Identify DB records whose associated media no longer exists
+    const orphanDbRows = db.prepare(`
+      SELECT id, cached_path, thumbnail_path FROM images 
+      WHERE (media_type = 'movie' AND media_id NOT IN (SELECT id FROM movies))
+         OR (media_type = 'series' AND media_id NOT IN (SELECT id FROM series))
+         OR (media_type = 'season' AND media_id NOT IN (SELECT id FROM seasons))
+         OR (media_type = 'episode' AND media_id NOT IN (SELECT id FROM episodes))
+         OR (media_type = 'album' AND media_id NOT IN (SELECT id FROM albums))
+         OR (media_type = 'artist' AND media_id NOT IN (SELECT id FROM artists))
+    `).all();
+
+    if (orphanDbRows.length > 0) {
+      const deleteDbStmt = db.prepare('DELETE FROM images WHERE id = ?');
+      const deleteBatch = db.transaction((rows) => {
+        for (const row of rows) {
+          deleteDbStmt.run(row.id);
+        }
+      });
+
+      // Remove physical files referenced by orphan DB rows
+      for (const row of orphanDbRows) {
+        for (const p of [row.cached_path, row.thumbnail_path]) {
+          if (p && fs.existsSync(p)) {
+            try {
+              const sz = fs.statSync(p).size;
+              fs.unlinkSync(p);
+              stats.deletedFiles++;
+              stats.freedBytes += sz;
+            } catch (err) {
+              stats.errors.push(`Failed to delete ${p}: ${err.message}`);
+            }
+          }
+        }
+      }
+
+      deleteBatch(orphanDbRows);
+      stats.deletedDbRecords = orphanDbRows.length;
+    }
+
+    // 2. Scan physical cache directories for files not referenced in images table
+    const activePaths = new Set();
+    const rows = db.prepare('SELECT cached_path, thumbnail_path FROM images').all();
+    for (const r of rows) {
+      if (r.cached_path) activePaths.add(path.resolve(r.cached_path).toLowerCase());
+      if (r.thumbnail_path) activePaths.add(path.resolve(r.thumbnail_path).toLowerCase());
+    }
+
+    for (const dir of [cacheDir, coversCacheDir]) {
+      if (!fs.existsSync(dir)) continue;
+      let files = [];
+      try {
+        files = fs.readdirSync(dir);
+      } catch (e) {
+        continue;
+      }
+
+      for (const file of files) {
+        const fullPath = path.join(dir, file);
+        try {
+          const stat = fs.statSync(fullPath);
+          if (!stat.isFile()) continue;
+
+          // Don't delete freshly created files (< 5 mins old) to avoid race conditions with active scans
+          if (Date.now() - stat.mtimeMs < 5 * 60 * 1000) continue;
+
+          const norm = path.resolve(fullPath).toLowerCase();
+          if (!activePaths.has(norm)) {
+            fs.unlinkSync(fullPath);
+            stats.deletedFiles++;
+            stats.freedBytes += stat.size;
+          }
+        } catch (fileErr) {
+          stats.errors.push(`Error checking ${fullPath}: ${fileErr.message}`);
+        }
+      }
+    }
+
+    if (stats.deletedDbRecords > 0 || stats.deletedFiles > 0) {
+      console.log(`[image-cache] Orphan cleanup complete: removed ${stats.deletedDbRecords} orphan DB records, ${stats.deletedFiles} files (${(stats.freedBytes / (1024 * 1024)).toFixed(2)} MB freed).`);
+    }
+  } catch (err) {
+    console.error('[image-cache] cleanupOrphanImageFiles error:', err.message);
+    stats.errors.push(err.message);
+  }
+
+  return stats;
+}
+
+// Periodic lightweight invocation (every 12 hours with an initial deferred check)
+const CLEANUP_INTERVAL_MS = 12 * 60 * 60 * 1000;
+const orphanCleanupTimer = setInterval(() => {
+  try { cleanupOrphanImageFiles(); } catch {}
+}, CLEANUP_INTERVAL_MS);
+if (orphanCleanupTimer.unref) orphanCleanupTimer.unref();
+
+const initialCleanupTimer = setTimeout(() => {
+  try { cleanupOrphanImageFiles(); } catch {}
+}, 45 * 1000);
+if (initialCleanupTimer.unref) initialCleanupTimer.unref();

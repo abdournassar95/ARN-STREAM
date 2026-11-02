@@ -1,97 +1,88 @@
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
+import { useSettingsStore } from '../../store/useSettingsStore';
 
 /**
- * CosmicBackground — Animated galaxy/nebula backdrop
+ * CosmicBackground — GPU-Optimized Animated Galaxy / Nebula Backdrop
  *
- * Layers (back to front):
- *   1. Deep cosmic base gradient (dark mode) or aurora pastel (light mode)
- *   2. Animated nebula clouds (multi-color radial blobs that drift)
- *   3. Aurora ribbons (flowing conic gradients)
- *   4. Starfield (random twinkling stars via CSS)
- *   5. Shooting star (occasional diagonal streak)
- *
- * Props:
- *   - variant: 'dark' | 'light' | 'auto' (default 'auto' follows `dark` class)
- *   - density: 'low' | 'normal' | 'high' — star count
- *   - showAurora: boolean — show aurora ribbons (default true)
- *   - showNebula: boolean — show nebula clouds (default true)
- *   - showShootingStar: boolean — show occasional shooting star (default true)
+ * Optimizations:
+ *   - Consolidates 60+ individual star DOM elements into 2 GPU-composited CSS box-shadow layers
+ *   - Uses pre-softened gradients instead of expensive runtime filter:blur(80px) on rotating layers
+ *   - Automatically adapts to Smart Performance Mode ('turbo' vs 'ultra')
  */
-export default function CosmicBackground({
-  variant = 'auto',
+const CosmicBackground = memo(function CosmicBackground({
   density = 'normal',
   showShootingStar = true
 }) {
-  // Generate stable random stars (memoized so they don't shuffle on re-render)
-  const stars = useMemo(() => {
-    const counts = { low: 35, normal: 60, high: 90 };
-    const count = counts[density] || counts.normal;
-    return Array.from({ length: count }, (_, i) => ({
-      id: i,
-      x: Math.random() * 100,
-      y: Math.random() * 100,
-      size: Math.random() < 0.7 ? Math.random() * 1.5 + 0.5 : Math.random() * 2.2 + 0.8,
-      delay: Math.random() * 5,
-      duration: Math.random() * 3 + 2.5,
-      opacity: Math.random() * 0.5 + 0.4
-    }));
-  }, [density]);
+  const performanceMode = useSettingsStore((s) => s.performanceMode);
+  const isTurbo = performanceMode === 'turbo';
+
+  // Generate 2 consolidated starfield box-shadow strings (replaces 60+ DOM nodes with 2 divs)
+  const { layerA, layerB } = useMemo(() => {
+    const counts = { low: 36, normal: 60, high: 90 };
+    const total = isTurbo ? 28 : (counts[density] || counts.normal);
+    const half = Math.ceil(total / 2);
+
+    const makeShadows = (count, seedOffset) => {
+      const shadows = [];
+      for (let i = 0; i < count; i++) {
+        // Deterministic pseudo-random distribution for stable layout
+        const s1 = Math.sin((i + 1 + seedOffset) * 12.9898) * 43758.5453;
+        const s2 = Math.cos((i + 1 + seedOffset) * 78.233) * 43758.5453;
+        const x = ((s1 - Math.floor(s1)) * 100).toFixed(2);
+        const y = ((s2 - Math.floor(s2)) * 100).toFixed(2);
+        const alpha = (0.35 + ((i * 7) % 6) * 0.1).toFixed(2);
+        shadows.push(`${x}vw ${y}vh 0 0 rgba(255,255,255,${alpha})`);
+      }
+      return shadows.join(',');
+    };
+
+    return {
+      layerA: makeShadows(half, 0),
+      layerB: makeShadows(total - half, 100)
+    };
+  }, [density, isTurbo]);
 
   return (
-    <div className="absolute inset-0 pointer-events-none overflow-hidden" aria-hidden="true">
+    <div className="absolute inset-0 pointer-events-none overflow-hidden contain-paint" aria-hidden="true">
       {/* Layer 1: Deep cosmic base gradient */}
       <div className="absolute inset-0 bg-cosmic-base" />
 
-      {/* Layer 2: Nebula clouds — large animated radial blobs */}
-      <div className="absolute inset-0 transform-gpu">
-        {/* Magenta/Pink nebula (top-right) */}
-        <div className="absolute -top-32 -right-32 w-[600px] h-[600px] rounded-full opacity-35 dark:opacity-45 blur-2xl nebula-pink" />
-
-        {/* Cyan/Teal nebula (bottom-left) */}
-        <div className="absolute -bottom-40 -left-32 w-[700px] h-[700px] rounded-full opacity-25 dark:opacity-35 blur-2xl nebula-cyan" />
-
-        {/* Purple/Indigo nebula (center) */}
-        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 w-[800px] h-[500px] rounded-full opacity-20 dark:opacity-30 blur-2xl nebula-purple" />
-
-        {/* Emerald/Aqua accent (bottom-right) */}
-        <div className="absolute -bottom-20 right-1/4 w-[500px] h-[500px] rounded-full opacity-15 dark:opacity-25 blur-2xl nebula-emerald" />
-
-        {/* Ruby/Red accent (top-left small) */}
-        <div className="absolute top-1/4 -left-20 w-[400px] h-[400px] rounded-full opacity-15 dark:opacity-20 blur-2xl nebula-ruby" />
-      </div>
-
-      {/* Layer 3: Aurora ribbons — flowing conic gradients with GPU transform */}
-      <div className="absolute inset-0 opacity-25 dark:opacity-40 animate-cosmic-aurora pointer-events-none transform-gpu will-change-transform">
-        <div className="absolute -top-1/2 left-1/2 -translate-x-1/2 w-[1200px] h-[1200px] aurora-ribbon" />
-      </div>
-      <div className="absolute inset-0 opacity-15 dark:opacity-30 animate-cosmic-aurora-reverse pointer-events-none transform-gpu will-change-transform">
-        <div className="absolute -bottom-1/2 left-1/2 -translate-x-1/2 w-[1000px] h-[1000px] aurora-ribbon-2" />
-      </div>
-
-      {/* Layer 4: Starfield */}
+      {/* Layer 2: Pre-softened Nebula clouds (no heavy runtime Gaussian blur) */}
       <div className="absolute inset-0">
-        {stars.map((star) => (
-          <div
-            key={star.id}
-            className="absolute rounded-full bg-white animate-cosmic-twinkle"
-            style={{
-              left: `${star.x}%`,
-              top: `${star.y}%`,
-              width: `${star.size}px`,
-              height: `${star.size}px`,
-              opacity: star.opacity,
-              animationDelay: `${star.delay}s`,
-              animationDuration: `${star.duration}s`,
-              boxShadow: star.size > 2
-                ? `0 0 ${star.size * 2}px rgba(255,255,255,0.6)`
-                : undefined
-            }}
-          />
-        ))}
+        <div className="absolute -top-32 -right-32 w-[560px] h-[560px] rounded-full opacity-30 dark:opacity-40 nebula-pink" />
+        <div className="absolute -bottom-40 -left-32 w-[640px] h-[640px] rounded-full opacity-20 dark:opacity-30 nebula-cyan" />
+        {!isTurbo && (
+          <>
+            <div className="absolute top-1/3 left-1/2 -translate-x-1/2 w-[720px] h-[460px] rounded-full opacity-15 dark:opacity-25 nebula-purple" />
+            <div className="absolute -bottom-20 right-1/4 w-[460px] h-[460px] rounded-full opacity-15 dark:opacity-20 nebula-emerald" />
+          </>
+        )}
       </div>
 
-      {/* Layer 5: Shooting star (occasional) */}
-      {showShootingStar && (
+      {/* Layer 3: Aurora ribbons — active only in Ultra mode */}
+      {!isTurbo && (
+        <>
+          <div className="absolute inset-0 opacity-20 dark:opacity-35 animate-cosmic-aurora pointer-events-none">
+            <div className="absolute -top-1/2 left-1/2 -translate-x-1/2 w-[1100px] h-[1100px] aurora-ribbon" />
+          </div>
+          <div className="absolute inset-0 opacity-15 dark:opacity-25 animate-cosmic-aurora-reverse pointer-events-none">
+            <div className="absolute -bottom-1/2 left-1/2 -translate-x-1/2 w-[960px] h-[960px] aurora-ribbon-2" />
+          </div>
+        </>
+      )}
+
+      {/* Layer 4: Consolidated 2-Layer GPU Starfield (replaces 60+ DOM nodes) */}
+      <div
+        className={isTurbo ? 'absolute top-0 left-0 w-[1.5px] h-[1.5px] rounded-full opacity-75' : 'absolute top-0 left-0 w-[1.5px] h-[1.5px] rounded-full animate-cosmic-twinkle'}
+        style={{ boxShadow: layerA, animationDuration: '4s' }}
+      />
+      <div
+        className={isTurbo ? 'absolute top-0 left-0 w-[2px] h-[2px] rounded-full opacity-60' : 'absolute top-0 left-0 w-[2px] h-[2px] rounded-full animate-cosmic-twinkle'}
+        style={{ boxShadow: layerB, animationDuration: '5.5s', animationDelay: '1.8s' }}
+      />
+
+      {/* Layer 5: Shooting star (occasional, disabled in Turbo mode) */}
+      {showShootingStar && !isTurbo && (
         <div className="absolute inset-0 animate-cosmic-shooting">
           <div className="shooting-star" />
         </div>
@@ -101,4 +92,6 @@ export default function CosmicBackground({
       <div className="absolute inset-0 bg-cosmic-vignette" />
     </div>
   );
-}
+});
+
+export default CosmicBackground;

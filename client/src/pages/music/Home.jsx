@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import TopBar from '../../components/shared/TopBar';
 import { ArtistCard, AlbumCard } from '../../components/shared/Card';
 import GlassCarousel from '../../components/shared/GlassCarousel';
+import ContinueListeningHub from '../../components/shared/ContinueListeningHub';
 import { fetchMusicHome } from '../../api/client';
 import Spinner from '../../components/shared/Spinner';
 import { Link } from 'react-router-dom';
@@ -17,7 +18,7 @@ export default function MusicHome() {
 
   if (isLoading) return <div className="min-h-screen bg-bg"><TopBar variant="music"/><div className="flex justify-center pt-20"><Spinner/></div></div>;
 
-  const isEmpty = !data?.artists?.length && !data?.albums?.length && !data?.recentlyPlayed?.length && (!data?.playlists || data.playlists.length === 0);
+  const isEmpty = !data?.artists?.length && !data?.albums?.length && !data?.recentlyPlayed?.length && !data?.continueListening?.length && (!data?.playlists || data.playlists.length === 0);
 
   return (
     <div className="min-h-screen bg-bg pb-24">
@@ -67,6 +68,11 @@ export default function MusicHome() {
                 <div className="font-semibold text-sm text-text">{i18n.language === 'ar' ? 'الأكثر استماعاً' : 'Most Played'}</div>
               </Link>
             </section>
+
+            {/* Continue Listening Hub (Up to 8 items) */}
+            {data?.continueListening?.length > 0 && (
+              <ContinueListeningHub items={data.continueListening} />
+            )}
 
             {/* Artists */}
             {data?.artists?.length > 0 && (

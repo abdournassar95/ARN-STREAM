@@ -52,10 +52,36 @@ export default function Album() {
   const cover = album.covers?.[0]?.url;
   const totalDuration = album.tracks?.reduce((a,t)=>a+(t.duration||0),0) || 0;
 
+  // Find latest in-progress track in this album for quick resume
+  const latestInProgressTrack = (album.tracks || []).reduce((best, t) => {
+    const pos = t.playback?.position || 0;
+    const dur = t.playback?.duration || t.duration || 0;
+    if (pos > 3 && (!dur || pos < dur * 0.95)) {
+      const ts = t.playback?.updated_at ? new Date(t.playback.updated_at).getTime() : 0;
+      const bestTs = best?.playback?.updated_at ? new Date(best.playback.updated_at).getTime() : 0;
+      if (!best || ts >= bestTs) return t;
+    }
+    return best;
+  }, null);
+
+  const handleResumeAlbum = () => {
+    if (!latestInProgressTrack || !album.tracks?.length) return;
+    const queue = album.tracks.map(t => ({
+      ...t,
+      artistName: album.artistName,
+      artistId: album.artist_id,
+      albumTitle: album.title,
+      cover,
+      resumePosition: 0
+    }));
+    const target = queue.find(q => q.id === latestInProgressTrack.id) || queue[0];
+    playTrack(target, queue);
+  };
+
   const handlePlayAll = () => {
     if (!album.tracks?.length) return;
     // enrich tracks with album cover and artistId for navigation
-    const queue = album.tracks.map(t=> ({...t, artistName: album.artistName, artistId: album.artist_id, cover }));
+    const queue = album.tracks.map(t=> ({...t, artistName: album.artistName, artistId: album.artist_id, cover, resumePosition: 0 }));
     setQueue(queue, 0);
   };
 
@@ -189,6 +215,22 @@ export default function Album() {
               >
                 <Play size={24} fill="black" className="ms-1"/>
               </button>
+
+              {latestInProgressTrack && (
+                <button
+                  onClick={handleResumeAlbum}
+                  className="flex items-center gap-2 px-4 py-3 rounded-full bg-primaryMusic/15 hover:bg-primaryMusic/25 text-primaryMusic border border-primaryMusic/40 text-xs sm:text-sm font-bold shadow-sm active:scale-95 transition"
+                  title={isRtl ? `استئناف: ${latestInProgressTrack.title}` : `Resume: ${latestInProgressTrack.title}`}
+                >
+                  <Play size={16} fill="currentColor" />
+                  <span className="truncate max-w-[180px] sm:max-w-[240px]">
+                    {isRtl
+                      ? `استئناف (${latestInProgressTrack.title})`
+                      : `Resume (${latestInProgressTrack.title})`}
+                  </span>
+                </button>
+              )}
+
               <button 
                 onClick={handleShuffleAll} 
                 className="w-11 h-11 sm:w-14 sm:h-14 rounded-full bg-surfaceHover text-text flex items-center justify-center hover:scale-105 shadow-lg active:scale-95 transition border border-border"
@@ -297,7 +339,18 @@ export default function Album() {
                   ) : (
                     <>
                       <span className="text-sm text-muted group-hover:hidden">{track.track_number || idx+1}</span>
-                      <button onClick={()=>{ const queue = album.tracks.map(t=>({...t, artistName: album.artistName, artistId: album.artist_id, cover})); const tIdx = queue.findIndex(q=>q.id===track.id); playTrack(queue[tIdx], queue); }} className="hidden group-hover:flex w-6 h-6 rounded-full bg-white text-black items-center justify-center"><Play size={12} fill="black" className="ms-0.5"/></button>
+                      <button onClick={() => {
+                        const queue = album.tracks.map(t => ({
+                          ...t,
+                          artistName: album.artistName,
+                          artistId: album.artist_id,
+                          albumTitle: album.title,
+                          cover,
+                          resumePosition: 0
+                        }));
+                        const tIdx = queue.findIndex(q => q.id === track.id);
+                        playTrack(queue[tIdx >= 0 ? tIdx : 0], queue);
+                      }} className="hidden group-hover:flex w-6 h-6 rounded-full bg-white text-black items-center justify-center cursor-pointer"><Play size={12} fill="black" className="ms-0.5"/></button>
                     </>
                   )}
 

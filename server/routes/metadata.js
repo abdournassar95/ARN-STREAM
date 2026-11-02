@@ -12,6 +12,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const router = express.Router();
+import metadataAutoFetcher from '../services/metadata-auto-fetcher.js';
 
 const appData = process.env.APPDATA || (process.platform === 'darwin' ? process.env.HOME + '/Library/Preferences' : process.env.HOME + "/.local/share");
 const uploadDir = path.join(appData, 'ARN_Stream', 'data', 'images_cache');
@@ -84,13 +85,14 @@ function isSafeExternalImageUrl(urlStr) {
   }
 }
 
-// Helper to deduplicate images
+// Helper to deduplicate images per image_type
 function deduplicateImageList(list) {
   if (!Array.isArray(list)) return [];
   const seen = new Set();
   const result = [];
   for (const img of list) {
-    const key = img.hash || (img.local_path ? path.normalize(img.local_path).toLowerCase() : null) || (img.cached_path ? path.basename(img.cached_path).toLowerCase() : null) || `id:${img.id}`;
+    const rawKey = img.hash || (img.local_path ? path.normalize(img.local_path).toLowerCase() : null) || (img.cached_path ? path.basename(img.cached_path).toLowerCase() : null) || `id:${img.id}`;
+    const key = `${img.image_type || 'poster'}:${rawKey}`;
     if (!seen.has(key)) {
       seen.add(key);
       result.push(img);
@@ -197,12 +199,12 @@ router.delete('/images/:id', requireAdmin, (req, res) => {
   const wasPrimary = Number(img.is_primary) === 1;
   const { media_type, media_id, image_type } = img;
 
-  // 2. Remove record and any duplicate rows for the same file/hash from database
+  // 2. Remove record and any duplicate rows for the same file/hash and image_type from database
   if (img.hash) {
-    db.prepare('DELETE FROM images WHERE media_type = ? AND media_id = ? AND hash = ?').run(media_type, media_id, img.hash);
+    db.prepare('DELETE FROM images WHERE media_type = ? AND media_id = ? AND image_type = ? AND hash = ?').run(media_type, media_id, image_type, img.hash);
   }
   if (img.local_path) {
-    db.prepare('DELETE FROM images WHERE media_type = ? AND media_id = ? AND LOWER(local_path) = LOWER(?)').run(media_type, media_id, img.local_path);
+    db.prepare('DELETE FROM images WHERE media_type = ? AND media_id = ? AND image_type = ? AND LOWER(local_path) = LOWER(?)').run(media_type, media_id, image_type, img.local_path);
   }
   db.prepare('DELETE FROM images WHERE id = ?').run(img.id);
 
@@ -418,12 +420,21 @@ router.put('/:type/:id', requireAdmin, (req, res) => {
           WHERE id = ?
         `).run(newBio || artist.bio, newCountry || artist.country, newGenre || artist.genre, existingOther.id);
 
-        const hasExistingPoster = db.prepare(`SELECT 1 FROM images WHERE media_type = 'artist' AND media_id = ?`).get(existingOther.id);
+        const hasExistingPoster = db.prepare(`SELECT 1 FROM images WHERE media_type = 'artist' AND media_id = ? AND (image_type = 'poster' OR image_type = 'avatar')`).get(existingOther.id);
         if (!hasExistingPoster) {
-          db.prepare(`UPDATE images SET media_id = ? WHERE media_type = 'artist' AND media_id = ?`).run(existingOther.id, id);
+          db.prepare(`UPDATE images SET media_id = ? WHERE media_type = 'artist' AND media_id = ? AND (image_type = 'poster' OR image_type = 'avatar')`).run(existingOther.id, id);
         } else {
-          db.prepare(`DELETE FROM images WHERE media_type = 'artist' AND media_id = ?`).run(id);
+          db.prepare(`DELETE FROM images WHERE media_type = 'artist' AND media_id = ? AND (image_type = 'poster' OR image_type = 'avatar')`).run(id);
         }
+
+        const hasExistingBackdrop = db.prepare(`SELECT 1 FROM images WHERE media_type = 'artist' AND media_id = ? AND (image_type = 'backdrop' OR image_type = 'fanart')`).get(existingOther.id);
+        if (!hasExistingBackdrop) {
+          db.prepare(`UPDATE images SET media_id = ? WHERE media_type = 'artist' AND media_id = ? AND (image_type = 'backdrop' OR image_type = 'fanart')`).run(existingOther.id, id);
+        } else {
+          db.prepare(`DELETE FROM images WHERE media_type = 'artist' AND media_id = ? AND (image_type = 'backdrop' OR image_type = 'fanart')`).run(id);
+        }
+
+        db.prepare(`DELETE FROM images WHERE media_type = 'artist' AND media_id = ?`).run(id);
 
         db.prepare('DELETE FROM artists WHERE id = ?').run(id);
 
@@ -519,21 +530,45 @@ router.put('/:type/:id', requireAdmin, (req, res) => {
   res.json({ data: { success: true, message: 'Metadata updated successfully' } });
 });
 
+// Proxy external image for client-side cropping (prevents canvas CORS taint)
+router.get('/proxy-image', requireAdmin, async (req, res) => {
+  const { url } = req.query;
+  if (!url || !isSafeExternalImageUrl(url)) {
+    return res.status(400).json({ error: { code: 'INVALID_URL', message: 'Invalid or forbidden image URL' } });
+  }
+  try {
+    const resp = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!resp.ok) throw new Error('Failed to download image');
+    const ct = resp.headers.get('content-type') || '';
+    if (!ct.startsWith('image/')) {
+      throw new Error('Remote URL did not return a valid image');
+    }
+    const ab = await resp.arrayBuffer();
+    res.setHeader('Content-Type', ct);
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.send(Buffer.from(ab));
+  } catch (err) {
+    res.status(400).json({ error: { code: 'PROXY_FAILED', message: err.message } });
+  }
+});
+
 // Upload poster or set by URL
 router.post('/:type/:id/poster', requireAdmin, upload.single('file'), async (req, res) => {
   const { type, id } = req.params;
-  const { imageUrl, imageType = 'poster' } = req.body || {};
+  const { imageUrl } = req.body || {};
+  const rawImageType = req.query?.imageType || req.body?.imageType || 'poster';
+  const isCropped = req.query?.cropped === '1' || req.body?.cropped === '1' || req.body?.cropped === true;
 
   if (!['movie', 'series', 'season', 'artist'].includes(type)) {
     return res.status(400).json({ error: { code: 'INVALID_TYPE', message: 'Type must be movie, series, season, or artist' } });
   }
 
-  let finalImageType = imageType;
-  if (type === 'season' && (imageType === 'poster' || !imageType)) {
+  let finalImageType = String(rawImageType).trim();
+  if (type === 'season' && (finalImageType === 'poster' || !finalImageType)) {
     finalImageType = 'season_poster';
   } else if (type === 'artist') {
-    if (imageType === 'avatar' || !imageType) finalImageType = 'poster';
-    else if (imageType === 'fanart') finalImageType = 'backdrop';
+    if (finalImageType === 'avatar' || !finalImageType) finalImageType = 'poster';
+    else if (finalImageType === 'fanart' || finalImageType === 'backdrop' || finalImageType === 'background') finalImageType = 'backdrop';
   }
 
   try {
@@ -562,14 +597,17 @@ router.post('/:type/:id/poster', requireAdmin, upload.single('file'), async (req
     const cachedPath = path.join(uploadDir, `${baseName}.webp`);
     const thumbPath = path.join(uploadDir, `${baseName}-thumb.webp`);
 
-    // Image dimensions: 1:1 square for albums/artists, 2:3 for posters, 16:9 for backdrops
+    // Image dimensions: 1:1 square for albums/artists (poster), 2:3 for posters, 16:9 / 3:1 for backdrops
     const isLandscape = finalImageType === 'backdrop' || finalImageType === 'fanart';
-    const isSquare = type === 'artist'; // artists are 1:1 square
+    const isSquare = type === 'artist' && !isLandscape; // artist profile photos are 1:1 square, NOT backdrops!
     const isPosterType = finalImageType === 'poster' || finalImageType === 'season_poster';
 
     // Full image dimensions
     let fullWidth, fullHeight;
-    if (isLandscape) {
+    if (isLandscape && type === 'artist') {
+      fullWidth = 1920;
+      fullHeight = 640; // 3:1 wide hero banner matching Artist.jsx banner
+    } else if (isLandscape) {
       fullWidth = 1280;
       fullHeight = Math.round(fullWidth * 0.5625); // 16:9
     } else if (isSquare) {
@@ -583,19 +621,24 @@ router.post('/:type/:id/poster', requireAdmin, upload.single('file'), async (req
       fullHeight = 750; // fallback portrait
     }
 
+    const cropPosition = (isCropped || isLandscape) ? 'center' : 'attention';
+
     const meta = await sharp(buffer)
       .resize({
         width: fullWidth,
         height: fullHeight,
         fit: 'cover',
-        position: 'attention'
+        position: cropPosition
       })
-      .webp({ quality: 85, effort: 4 })
+      .webp({ quality: 88, effort: 4 })
       .toFile(cachedPath);
 
     // Thumbnail
     let thumbWidth, thumbHeight;
-    if (isLandscape) {
+    if (isLandscape && type === 'artist') {
+      thumbWidth = 600;
+      thumbHeight = 200; // 3:1 thumb
+    } else if (isLandscape) {
       thumbWidth = 400;
       thumbHeight = Math.round(thumbWidth * 0.5625);
     } else if (isSquare) {
@@ -614,9 +657,9 @@ router.post('/:type/:id/poster', requireAdmin, upload.single('file'), async (req
         width: thumbWidth,
         height: thumbHeight,
         fit: 'cover',
-        position: 'attention'
+        position: cropPosition
       })
-      .webp({ quality: 80 })
+      .webp({ quality: 82 })
       .toFile(thumbPath);
 
     const hiddenPath = await saveMediaImageToFolder(type, id, finalImageType, buffer);
@@ -1035,6 +1078,44 @@ router.get('/search', async (req, res) => {
   }
 
   res.json({ data: results });
+});
+
+// Auto-fetch metadata endpoints
+router.get('/auto-fetch/status', requireAdmin, (req, res) => {
+  res.json({ data: metadataAutoFetcher.getStatus() });
+});
+
+router.post('/auto-fetch/start', requireAdmin, async (req, res) => {
+  try {
+    const options = req.body || {};
+    const status = await metadataAutoFetcher.start(options);
+    res.json({
+      success: true,
+      message: status.message || (status.isRunning ? 'تم بدء عملية جلب الميتاداتا والبوسترات في الخلفية.' : 'كافة الأعمال مكتملة بالفعل.'),
+      data: status
+    });
+  } catch (err) {
+    res.status(400).json({ error: { code: 'AUTO_FETCH_START_ERROR', message: err.message } });
+  }
+});
+
+router.post('/auto-fetch/stop', requireAdmin, (req, res) => {
+  const stopped = metadataAutoFetcher.stop();
+  res.json({
+    success: true,
+    message: 'تم إيقاف عملية جلب الميتاداتا بنجاح.',
+    data: metadataAutoFetcher.getStatus()
+  });
+});
+
+router.post('/auto-fetch/pause', requireAdmin, (req, res) => {
+  const paused = metadataAutoFetcher.pause();
+  res.json({ success: paused, data: metadataAutoFetcher.getStatus() });
+});
+
+router.post('/auto-fetch/resume', requireAdmin, (req, res) => {
+  const resumed = metadataAutoFetcher.resume();
+  res.json({ success: resumed, data: metadataAutoFetcher.getStatus() });
 });
 
 export default router;

@@ -185,20 +185,16 @@ export async function scanImages() {
   // 4. Scan artists (images)
   const artists = db.prepare('SELECT id, name FROM artists').all();
   for (const artist of artists) {
-    const existingArtistImg = db.prepare(`SELECT * FROM images WHERE media_type='artist' AND media_id=?`).get(artist.id);
-    let hasArtistImg = false;
-    if (existingArtistImg) {
+    const existingArtistImgs = db.prepare(`SELECT * FROM images WHERE media_type='artist' AND media_id=?`).all(artist.id);
+    for (const existingArtistImg of existingArtistImgs) {
       const cacheExists = existingArtistImg.cached_path ? fs.existsSync(existingArtistImg.cached_path) : true;
       const thumbExists = existingArtistImg.thumbnail_path ? fs.existsSync(existingArtistImg.thumbnail_path) : true;
       const localExists = (existingArtistImg.source === 'local_file' && existingArtistImg.local_path) ? fs.existsSync(existingArtistImg.local_path) : true;
       
       if (!cacheExists || !thumbExists || !localExists) {
         db.prepare('DELETE FROM images WHERE id=?').run(existingArtistImg.id);
-      } else {
-        hasArtistImg = true;
       }
     }
-    if (hasArtistImg) continue;
 
     // Per user request, do not scan for local image files (like folder.jpg, artist.jpg) in artist folders.
   }

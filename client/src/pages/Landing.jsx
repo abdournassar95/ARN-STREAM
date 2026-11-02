@@ -2,9 +2,10 @@ import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { fetchLanding } from '../api/client';
+import { fetchLanding, fetchLibrary } from '../api/client';
 import GlassCarousel from '../components/shared/GlassCarousel';
 import ContinueWatchingHub from '../components/shared/ContinueWatchingHub';
+import ContinueListeningHub from '../components/shared/ContinueListeningHub';
 import { MovieCard, AlbumCard } from '../components/shared/Card';
 import EditLibraryCoversModal from '../components/modals/EditLibraryCoversModal';
 import EditLiveTvCoversModal, { DEFAULT_LIVE_TV_COVERS } from '../components/modals/EditLiveTvCoversModal';
@@ -16,10 +17,11 @@ import {
   Languages, Settings, FolderPlus, Activity, Palette, MessageCircle, 
   Send, Facebook, Ghost, Moon, Sun, ArrowRight, QrCode,
   SlidersHorizontal, GripVertical, ChevronLeft, ChevronRight, RotateCcw,
-  Users
+  Users, Search, Zap
 } from 'lucide-react';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useAuthStore } from '../store/useAuthStore';
+import { usePlayerStore } from '../store/usePlayerStore';
 import UserMenu from '../components/shared/UserMenu';
 import { localizeLibraryName } from '../utils/localization';
 
@@ -314,8 +316,8 @@ export default function Landing() {
   const { data, isLoading } = useQuery({ 
     queryKey: ['landing'], 
     queryFn: fetchLanding,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: true
+    staleTime: 2 * 60 * 1000,
+    refetchOnWindowFocus: false
   });
 
   const [editingLibrary, setEditingLibrary] = useState(null);
@@ -332,8 +334,25 @@ export default function Landing() {
     liveTvCovers,
     setHomeLibrariesOrder,
     setHomeLibraryCardSize,
-    resetHomeLibrariesOrder
+    resetHomeLibrariesOrder,
+    libraryPreferences = {},
+    libraryGlobalSort = 'added_at',
+    libraryGlobalOrder = 'desc',
+    performanceMode,
+    togglePerformanceMode,
+    setCommandPaletteOpen
   } = useSettingsStore();
+
+  const handlePrefetchLibrary = (libId) => {
+    const prefs = libraryPreferences[libId] || {};
+    const sort = prefs.sort || libraryGlobalSort;
+    const order = prefs.order || libraryGlobalOrder;
+    queryClient.prefetchQuery({
+      queryKey: ['library', String(libId), sort, order, 'artists'],
+      queryFn: () => fetchLibrary(libId, { sort, order, view: 'artists', limit: 10000 }),
+      staleTime: 5 * 60 * 1000
+    });
+  };
 
 let currentSections = (homeSectionsOrder || []).map(sec => typeof sec === 'string' ? { id: sec, enabled: true } : sec);
   
@@ -382,25 +401,7 @@ let currentSections = (homeSectionsOrder || []).map(sec => typeof sec === 'strin
 
       case 'continueListening':
         if (!data?.continueListening?.length) return null;
-        return (
-          <div key="continueListening" className="mt-16 sm:mt-24">
-            <div className="flex items-center justify-between mb-4 px-1">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-primaryMusic/20 border border-primaryMusic/30 flex items-center justify-center text-primaryMusic shadow-sm">
-                  <Music size={18} />
-                </div>
-                <h2 className="text-xl sm:text-2xl font-bold text-text">
-                  {i18n.language === 'ar' ? 'متابعة الاستماع' : 'Continue Listening'}
-                </h2>
-              </div>
-            </div>
-            <GlassCarousel>
-              {data.continueListening.filter(item => Boolean(item.poster)).map(item => (
-                <MovieCard key={`cl-${item.id}`} item={item} to={`/music/album/${item.albumId}`} />
-              ))}
-            </GlassCarousel>
-          </div>
-        );
+        return <ContinueListeningHub key="continueListening" items={data.continueListening} />;
 
       case 'latestAudio':
         if (!data?.latestAudio?.length) return null;
@@ -547,7 +548,15 @@ let currentSections = (homeSectionsOrder || []).map(sec => typeof sec === 'strin
 
   // Unified items list (libraries + Live TV) respecting user custom order
   const unifiedItems = useMemo(() => {
-    const currentLiveCovers = (liveTvCovers && liveTvCovers.length > 0) ? liveTvCovers : DEFAULT_LIVE_TV_COVERS;
+    const OLD_DEFAULTS = [
+      '/channels/bein_sports.svg',
+      '/channels/ssc_sports.svg',
+      '/channels/mbc_hd.svg',
+      '/channels/osn_tv.svg',
+      '/channels/natgeo.svg'
+    ];
+    const isOldDefault = Array.isArray(liveTvCovers) && liveTvCovers.length === 5 && liveTvCovers.every((c, i) => c === OLD_DEFAULTS[i]);
+    const currentLiveCovers = (liveTvCovers && liveTvCovers.length > 0 && !isOldDefault) ? liveTvCovers : DEFAULT_LIVE_TV_COVERS;
     const baseItems = [
       ...librariesList.map(lib => ({ ...lib, itemType: 'library' })),
       { 
@@ -673,6 +682,40 @@ let currentSections = (homeSectionsOrder || []).map(sec => typeof sec === 'strin
           <span className="font-bold text-base sm:text-lg tracking-tight text-text drop-shadow-md">ARN Stream</span>
         </div>
         <div className="flex items-center gap-1.5 sm:gap-2.5">
+          {/* Spotlight Command Palette Trigger (Ctrl+K) */}
+          <button
+            type="button"
+            onClick={() => setCommandPaletteOpen(true)}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface/90 border border-cyan-500/30 hover:border-cyan-400/60 hover:bg-surfaceHover text-xs sm:text-sm font-medium transition text-text shadow-sm group"
+            title={isArabic ? 'البحث ولوحة الأوامر السريعة (Ctrl+K)' : 'Spotlight Search & Commands (Ctrl+K)'}
+          >
+            <Search size={14} className="text-cyan-400 group-hover:scale-110 transition-transform" />
+            <span className="hidden md:inline text-muted group-hover:text-text transition-colors">
+              {isArabic ? 'بحث سريع...' : 'Quick Search...'}
+            </span>
+            <kbd className="hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-mono font-bold bg-white/10 text-cyan-300 rounded border border-white/10">
+              Ctrl+K
+            </kbd>
+          </button>
+
+          {/* Smart GPU Performance Mode Toggle */}
+          <button
+            type="button"
+            onClick={togglePerformanceMode}
+            className={`flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full border transition ${
+              performanceMode === 'turbo'
+                ? 'bg-amber-500/20 border-amber-400/50 text-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.3)]'
+                : 'bg-surface border-border hover:bg-surfaceHover text-muted hover:text-text'
+            }`}
+            title={
+              performanceMode === 'turbo'
+                ? (isArabic ? 'وضع الأداء الخارق (Turbo GPU 120fps) مفعل — اضغط للعودة لوضع Ultra Glass' : 'Turbo GPU Mode Active — Click for Ultra Glass')
+                : (isArabic ? 'تفعيل وضع السرعة الفائقة (Turbo GPU) للأجهزة الضعيفة والشاشات' : 'Enable Turbo GPU Mode (Eco GPU)')
+            }
+          >
+            <Zap size={15} className={performanceMode === 'turbo' ? 'fill-amber-400' : ''} />
+          </button>
+
           {/* Watch Party Quick Connect */}
           <button
             type="button"
@@ -837,10 +880,10 @@ let currentSections = (homeSectionsOrder || []).map(sec => typeof sec === 'strin
                 const liveMeta = {
                   Icon: Tv,
                   to: '/live',
-                  bgGradient: 'from-red-600/30 via-rose-600/15 to-transparent',
-                  borderColor: 'hover:border-red-500/60',
-                  iconBg: 'bg-gradient-to-tr from-red-600 to-rose-500 text-white shadow-red-600/30',
-                  badgeBg: 'bg-red-600 text-white',
+                  bgGradient: 'from-violet-600/35 via-purple-600/20 to-fuchsia-600/10',
+                  borderColor: 'hover:border-violet-500/70',
+                  iconBg: 'bg-gradient-to-tr from-[#5b21b6] via-[#7c3aed] to-[#9333ea] text-white shadow-violet-600/40',
+                  badgeBg: 'bg-[#7c3aed] text-white',
                   countText: isArabic ? 'بث حي ومباشر' : 'LIVE 24/7',
                 };
 
@@ -848,14 +891,20 @@ let currentSections = (homeSectionsOrder || []).map(sec => typeof sec === 'strin
                   <Link
                     key="live_tv"
                     to="/live"
-                    onClick={(e) => { if (isCustomizingCards) e.preventDefault(); }}
+                    onClick={(e) => { 
+                      if (isCustomizingCards) {
+                        e.preventDefault(); 
+                      } else {
+                        usePlayerStore.getState().stopMusicForVideo();
+                      }
+                    }}
                     draggable={isCustomizingCards}
                     onDragStart={(e) => handleDragStart(e, index)}
                     onDragOver={handleDragOver}
                     onDrop={(e) => handleDrop(e, index)}
                     className={`group relative rounded-2xl sm:rounded-[22px] overflow-hidden bg-surface border ${
-                      isCustomizingCards ? 'border-amber-400/60 ring-2 ring-amber-500/20 shadow-amber-500/20' : 'border-red-500/30 hover:border-red-500/70'
-                    } ${draggedIndex === index ? 'opacity-40 scale-95 border-dashed border-amber-400' : ''} shadow-xl hover:shadow-[0_0_30px_rgba(239,68,68,0.25)] transition-all duration-180 ease-out hover:scale-[1.02] transform-gpu will-change-transform flex flex-col justify-between ${sizeConfig.minHeight}`}
+                      isCustomizingCards ? 'border-amber-400/60 ring-2 ring-amber-500/20 shadow-amber-500/20' : 'border-violet-500/35 hover:border-violet-500/75'
+                    } ${draggedIndex === index ? 'opacity-40 scale-95 border-dashed border-amber-400' : ''} shadow-xl hover:shadow-[0_0_32px_rgba(124,58,237,0.35)] transition-all duration-180 ease-out hover:scale-[1.02] transform-gpu will-change-transform flex flex-col justify-between ${sizeConfig.minHeight}`}
                   >
                     {/* Overlapping TV Channel Posters Collage */}
                     <LibraryCardCollage
@@ -900,7 +949,7 @@ let currentSections = (homeSectionsOrder || []).map(sec => typeof sec === 'strin
 
                     {/* Top Bar: Icon & Live Badge */}
                     <div className="relative z-20 flex items-start justify-between gap-2">
-                      <div className={`${sizeConfig.iconWrap} bg-gradient-to-tr from-red-600 to-rose-500 text-white flex items-center justify-center shadow-lg shadow-red-600/40 group-hover:scale-110 transition-transform duration-300 ring-1 ring-white/20`}>
+                      <div className={`${sizeConfig.iconWrap} bg-gradient-to-tr from-[#5b21b6] via-[#7c3aed] to-[#9333ea] text-white flex items-center justify-center shadow-lg shadow-violet-600/45 group-hover:scale-110 transition-transform duration-300 ring-1 ring-white/20`}>
                         <Tv size={sizeConfig.iconSize} />
                       </div>
 
@@ -914,14 +963,14 @@ let currentSections = (homeSectionsOrder || []).map(sec => typeof sec === 'strin
                               e.stopPropagation();
                               setShowLiveTvCoversModal(true);
                             }}
-                            className="w-8 h-8 rounded-full bg-black/40 hover:bg-black/75 backdrop-blur-md border border-white/20 hover:border-red-500/70 text-white/80 hover:text-red-400 flex items-center justify-center transition-all duration-200 hover:scale-110 shadow-lg"
+                            className="w-8 h-8 rounded-full bg-black/40 hover:bg-black/75 backdrop-blur-md border border-white/20 hover:border-violet-500/70 text-white/80 hover:text-violet-400 flex items-center justify-center transition-all duration-200 hover:scale-110 shadow-lg"
                             title={isArabic ? 'تخصيص صور قنوات البث المباشر' : 'Customize Live TV channel posters'}
                           >
-                            <Sparkles size={14} className="text-red-400" />
+                            <Sparkles size={14} className="text-violet-400" />
                           </button>
                         )}
 
-                        <span className={`rounded-full font-black uppercase tracking-wider bg-red-600 text-white shadow-md shadow-red-600/50 flex items-center gap-1.5 animate-pulse ${sizeConfig.badgeSize}`}>
+                        <span className={`rounded-full font-black uppercase tracking-wider bg-gradient-to-r from-[#6d28d9] to-[#7c3aed] text-white shadow-md shadow-violet-600/50 flex items-center gap-1.5 animate-pulse ${sizeConfig.badgeSize}`}>
                           <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
                           {isArabic ? 'مباشر' : 'LIVE'}
                         </span>
@@ -930,10 +979,10 @@ let currentSections = (homeSectionsOrder || []).map(sec => typeof sec === 'strin
 
                     {/* Bottom Bar: Title & Action Button */}
                     <div className="relative z-20 mt-auto flex items-center justify-between gap-3">
-                      <h2 className={`${sizeConfig.titleSize} text-white drop-shadow-[0_4px_10px_rgba(0,0,0,0.95)] group-hover:text-red-400 transition-colors truncate`}>
+                      <h2 className={`${sizeConfig.titleSize} text-white drop-shadow-[0_4px_10px_rgba(0,0,0,0.95)] group-hover:text-violet-300 transition-colors truncate`}>
                         {isArabic ? 'البث المباشر' : 'Live TV'}
                       </h2>
-                      <span className={`inline-flex items-center justify-center rounded-full bg-red-600 text-white group-hover:bg-red-500 shadow-xl group-hover:scale-110 transition-all duration-180 ease-out shrink-0 ${sizeConfig.arrowBtn}`}>
+                      <span className={`inline-flex items-center justify-center rounded-full bg-[#7c3aed] text-white group-hover:bg-[#8b5cf6] shadow-xl shadow-violet-600/35 group-hover:scale-110 transition-all duration-180 ease-out shrink-0 ${sizeConfig.arrowBtn}`}>
                         <ArrowRight size={sizeConfig.arrowSize} className={isArabic ? 'rotate-180' : ''} />
                       </span>
                     </div>
@@ -949,6 +998,7 @@ let currentSections = (homeSectionsOrder || []).map(sec => typeof sec === 'strin
                 <Link
                   key={lib.id}
                   to={meta.to}
+                  onMouseEnter={() => handlePrefetchLibrary(lib.id)}
                   onClick={(e) => { if (isCustomizingCards) e.preventDefault(); }}
                   draggable={isCustomizingCards}
                   onDragStart={(e) => handleDragStart(e, index)}

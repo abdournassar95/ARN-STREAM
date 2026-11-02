@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Tv,
   Monitor,
@@ -79,7 +80,39 @@ export default function DeviceHandoffModal() {
     }
   }, [isModalOpen, deviceName, fetchDevices]);
 
-  if (!isModalOpen) return null;
+  const [mountNode, setMountNode] = useState(() => (typeof document !== 'undefined' ? document.fullscreenElement || document.body : null));
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const updateTarget = () => {
+      setMountNode(document.fullscreenElement || document.body);
+    };
+    updateTarget();
+    document.addEventListener('fullscreenchange', updateTarget);
+    document.addEventListener('webkitfullscreenchange', updateTarget);
+    document.addEventListener('mozfullscreenchange', updateTarget);
+    document.addEventListener('MSFullscreenChange', updateTarget);
+    return () => {
+      document.removeEventListener('fullscreenchange', updateTarget);
+      document.removeEventListener('webkitfullscreenchange', updateTarget);
+      document.removeEventListener('mozfullscreenchange', updateTarget);
+      document.removeEventListener('MSFullscreenChange', updateTarget);
+    };
+  }, [isModalOpen]);
+
+  useEffect(() => {
+    if (!isModalOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        closeCastModal();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [isModalOpen, closeCastModal]);
+
+  if (!isModalOpen || !mountNode) return null;
 
   const handleSaveName = (e) => {
     e.preventDefault();
@@ -202,9 +235,9 @@ export default function DeviceHandoffModal() {
     </div>
   );
 
-  return (
+  return createPortal(
     <div 
-      className="fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-md animate-fadeIn"
+      className="fixed inset-0 z-[99999] flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-md animate-fadeIn"
       onClick={closeCastModal}
     >
       <div 
@@ -429,6 +462,7 @@ export default function DeviceHandoffModal() {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    mountNode
   );
 }

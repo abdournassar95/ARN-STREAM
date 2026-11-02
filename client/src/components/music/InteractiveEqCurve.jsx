@@ -2,13 +2,16 @@ import { useRef, useState, useCallback, memo } from 'react';
 import { useSettingsStore } from '../../store/useSettingsStore';
 
 const DISPLAY_BANDS = [
-  { storeIdx: 6, label: '12kHz', desc: 'Air' },
-  { storeIdx: 5, label: '6kHz', desc: 'Treble' },
-  { storeIdx: 4, label: '3kHz', desc: 'High-Mid' },
-  { storeIdx: 3, label: '1kHz', desc: 'Mid' },
-  { storeIdx: 2, label: '350Hz', desc: 'Low-Mid' },
-  { storeIdx: 1, label: '170Hz', desc: 'Bass' },
-  { storeIdx: 0, label: '60Hz', desc: 'Sub-Bass' }
+  { storeIdx: 9, label: '16kHz', desc: 'Air' },
+  { storeIdx: 8, label: '8kHz', desc: 'Treble' },
+  { storeIdx: 7, label: '4kHz', desc: 'High-Mid' },
+  { storeIdx: 6, label: '2kHz', desc: 'Upper-Mid' },
+  { storeIdx: 5, label: '1kHz', desc: 'Presence' },
+  { storeIdx: 4, label: '500Hz', desc: 'Mid' },
+  { storeIdx: 3, label: '250Hz', desc: 'Low-Mid' },
+  { storeIdx: 2, label: '125Hz', desc: 'Warmth' },
+  { storeIdx: 1, label: '62Hz', desc: 'Bass' },
+  { storeIdx: 0, label: '31Hz', desc: 'Sub-Bass' }
 ];
 
 function getSplinePoints(points, numSamples) {
@@ -46,7 +49,7 @@ function getSplinePoints(points, numSamples) {
 }
 
 const InteractiveEqCurve = memo(function InteractiveEqCurve({
-  bands = [0, 0, 0, 0, 0, 0, 0],
+  bands = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
   onBandChange,
   enabled = true,
   isRtl = false,
@@ -94,7 +97,7 @@ const InteractiveEqCurve = memo(function InteractiveEqCurve({
   });
 
   const allPoints = [
-    { x: 0, gain: (bands[6] || 0) * 0.5 },
+    { x: 0, gain: (bands[9] || 0) * 0.5 },
     ...nodePoints,
     { x: viewWidth, gain: (bands[0] || 0) * 0.5 }
   ];

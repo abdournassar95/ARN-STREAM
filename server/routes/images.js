@@ -86,12 +86,12 @@ router.delete('/:id', requireAdmin, (req, res) => {
 
   deleteImage(Number(req.params.id));
 
-  // Prune any lingering duplicates for the same image/hash
+  // Prune any lingering duplicates for the same image/hash and image_type
   if (hash) {
-    db.prepare('DELETE FROM images WHERE media_type = ? AND media_id = ? AND hash = ?').run(media_type, media_id, hash);
+    db.prepare('DELETE FROM images WHERE media_type = ? AND media_id = ? AND image_type = ? AND hash = ?').run(media_type, media_id, image_type, hash);
   }
   if (local_path) {
-    db.prepare('DELETE FROM images WHERE media_type = ? AND media_id = ? AND LOWER(local_path) = LOWER(?)').run(media_type, media_id, local_path);
+    db.prepare('DELETE FROM images WHERE media_type = ? AND media_id = ? AND image_type = ? AND LOWER(local_path) = LOWER(?)').run(media_type, media_id, image_type, local_path);
   }
 
   if (wasPrimary) {

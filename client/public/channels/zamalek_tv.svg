@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="zamalekBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0c1322"/>
+      <stop offset="45%" stop-color="#182236"/>
+      <stop offset="85%" stop-color="#090e18"/>
+      <stop offset="100%" stop-color="#04070d"/>
+    </linearGradient>
+    <radialGradient id="zamalekGlow" cx="50%" cy="28%" r="65%">
+      <stop offset="0%" stop-color="#ef4444" stop-opacity="0.35"/>
+      <stop offset="50%" stop-color="#ffffff" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="redBand" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ef4444"/>
+      <stop offset="100%" stop-color="#dc2626"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.7"/>
+    </filter>
+  </defs>
+
+  <!-- Background Base -->
+  <rect width="300" height="420" rx="20" fill="url(#zamalekBg)"/>
+  <rect width="300" height="420" rx="20" fill="url(#zamalekGlow)"/>
+
+  <!-- Iconic Zamalek Dual Red Stripes (خطين حمر) Across the Poster -->
+  <path d="M -40 120 L 340 40" stroke="#ef4444" stroke-width="5" stroke-opacity="0.85"/>
+  <path d="M -40 138 L 340 58" stroke="#ef4444" stroke-width="5" stroke-opacity="0.85"/>
+
+  <!-- Circular Stadium Rings -->
+  <circle cx="150" cy="205" r="130" fill="none" stroke="#ffffff" stroke-width="1.2" stroke-opacity="0.12" stroke-dasharray="8 6"/>
+  <circle cx="150" cy="205" r="95" fill="none" stroke="#ef4444" stroke-width="1.5" stroke-opacity="0.2"/>
+
+  <!-- Top Badges -->
+  <g transform="translate(18, 22)">
+    <rect width="68" height="24" rx="12" fill="#ef4444" filter="url(#shadow)"/>
+    <circle cx="14" cy="12" r="4" fill="#ffffff"/>
+    <text x="36" y="16" fill="#ffffff" font-family="'Cairo', 'Inter', sans-serif" font-weight="900" font-size="11" letter-spacing="1">LIVE</text>
+  </g>
+
+  <g transform="translate(216, 22)">
+    <rect width="66" height="24" rx="6" fill="#000000" fill-opacity="0.65" stroke="#ffffff" stroke-opacity="0.3" stroke-width="1"/>
+    <text x="33" y="16" fill="#ffffff" font-family="'Inter', sans-serif" font-weight="900" font-size="11" text-anchor="middle">FHD 1080</text>
+  </g>
+
+  <!-- Center Zamalek TV Branding Card -->
+  <g transform="translate(150, 205)" filter="url(#shadow)" text-anchor="middle">
+    <!-- Outer Glass Frame with White & Red Edge -->
+    <rect x="-115" y="-76" width="230" height="152" rx="20" fill="#0b101c" fill-opacity="0.9" stroke="#ffffff" stroke-opacity="0.3" stroke-width="1.5"/>
+
+    <!-- Pharaoh Archer Motif (Symbol of Zamalek) -->
+    <g transform="translate(0, -42)" stroke="#ef4444" stroke-width="2" fill="none" opacity="0.8">
+      <circle cx="0" cy="-6" r="4" fill="#ef4444"/>
+      <path d="M -8 10 L 0 0 L 8 10"/>
+      <path d="M -16 -2 Q 0 -12 16 -2" stroke="#ffffff" stroke-width="1.5"/>
+      <line x1="-12" y1="-2" x2="16" y2="-2" stroke="#ef4444" stroke-width="2"/>
+    </g>
+
+    <!-- ZAMALEK Typography -->
+    <text x="0" y="-4" fill="#ffffff" font-family="'Arial Black', 'Impact', sans-serif" font-weight="900" font-size="34" letter-spacing="2">
+      ZAMALEK
+    </text>
+
+    <!-- Dual Red Stripe Under Title -->
+    <rect x="-55" y="4" width="110" height="3" fill="url(#redBand)"/>
+    <rect x="-55" y="9" width="110" height="3" fill="url(#redBand)"/>
+
+    <!-- TV in Glass Badge -->
+    <g transform="translate(0, 18)">
+      <rect x="-45" y="0" width="90" height="22" rx="11" fill="#1e293b" stroke="#ffffff" stroke-width="1" stroke-opacity="0.4"/>
+      <text x="0" y="15" fill="#ffffff" font-family="'Cairo', 'Inter', sans-serif" font-weight="900" font-size="12" letter-spacing="1">
+        قناة الزمالك
+      </text>
+    </g>
+
+    <!-- Subtitle: Art & Engineering School -->
+    <g transform="translate(0, 46)">
+      <text x="0" y="12" fill="#cbd5e1" font-family="'Cairo', sans-serif" font-weight="800" font-size="11" letter-spacing="0.5">
+        مدرسة الفن والهندسة 1911
+      </text>
+    </g>
+  </g>
+
+  <!-- Bottom Details -->
+  <g transform="translate(20, 358)">
+    <text x="0" y="14" fill="#ffffff" font-family="'Cairo', sans-serif" font-weight="800" font-size="16">القلعة البيضاء</text>
+    <text x="0" y="32" fill="#cbd5e1" font-family="'Cairo', sans-serif" font-weight="600" font-size="12">تغطية شاملة ومباريات الفارس الأبيض</text>
+  </g>
+
+  <!-- Subtle Border Rim -->
+  <rect width="298" height="418" x="1" y="1" rx="19" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-opacity="0.15"/>
+</svg>

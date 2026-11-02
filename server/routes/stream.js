@@ -215,12 +215,16 @@ router.get('/info/:type/:id', async (req, res) => {
     const probeData = await probeMedia(filePath);
     const strategy = determineStreamStrategy(filePath, probeData);
     const localSubs = getLocalSubtitles(filePath);
+    const savedPlayback = req.user?.id
+      ? db.prepare(`SELECT position, duration, updated_at FROM playback_state WHERE media_type = ? AND media_id = ? AND user_id = ?`).get(type, Number(id), req.user.id)
+      : null;
 
     return res.json({
       success: true,
       data: {
         strategy,
         probe: probeData,
+        savedPlayback: savedPlayback || null,
         audioTracks: probeData.audioTracks || [],
         subtitles: [
           ...(probeData.embeddedSubtitles || []).map((s, idx) => ({

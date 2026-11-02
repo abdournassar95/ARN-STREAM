@@ -68,7 +68,8 @@ export default function Artist() {
     try {
       const { items } = await fetchTracks({ artist_id: id, limit: 1000 });
       if (!items || !items.length) return;
-      let queue = items.map(t => ({ ...t, artistName: artist.name, artistId: artist.id, cover: t.cover || artist.images?.[0]?.url }));
+      const fallbackPoster = artist.poster || artist.images?.find(i => (i.image_type === 'poster' || i.image_type === 'avatar') && i.url)?.url || artist.fallbackCover;
+      let queue = items.map(t => ({ ...t, artistName: artist.name, artistId: artist.id, cover: t.cover || fallbackPoster }));
       if (shuffle) queue.sort(() => Math.random() - 0.5);
       setQueue(queue, 0);
     } catch (err) {
@@ -82,7 +83,8 @@ export default function Artist() {
     try {
       const { items } = await fetchTracks({ album_id: album.id, limit: 500 });
       if (!items || !items.length) return;
-      const queue = items.map(t => ({ ...t, artistName: artist.name, artistId: artist.id, cover: album.cover || artist.images?.[0]?.url }));
+      const fallbackPoster = artist.poster || artist.images?.find(i => (i.image_type === 'poster' || i.image_type === 'avatar') && i.url)?.url || artist.fallbackCover;
+      const queue = items.map(t => ({ ...t, artistName: artist.name, artistId: artist.id, cover: album.cover || fallbackPoster }));
       setQueue(queue, 0);
     } catch (err) {
       console.error('Failed to play album:', err);
@@ -214,7 +216,7 @@ export default function Artist() {
                 </div>
               )}
 
-              <h1 className="text-2xl sm:text-4xl md:text-5xl font-bold truncate drop-shadow-[0_2px_8px_rgba(0,0,0,0.7)] text-text dark:text-white">{artist.name}</h1>
+              <h1 className="text-2xl sm:text-4xl md:text-5xl font-bold leading-normal py-1.5 truncate drop-shadow-[0_2px_8px_rgba(0,0,0,0.7)] text-text dark:text-white">{artist.name}</h1>
               <p className="text-xs sm:text-sm text-muted dark:text-slate-300 drop-shadow mt-1 mb-4">
                 {artist.albums.length} {isQuran ? (isRtl ? 'مصاحف وتلاوات' : 'recitations') : (isRtl ? 'ألبومات' : 'albums')}
               </p>

@@ -108,6 +108,7 @@ const AudioFxRack = memo(function AudioFxRack({ isRtl = false, enabled = true, i
             </div>
             <input
               type="range"
+              dir="ltr"
               min="0.05"
               max="0.80"
               step="0.01"
@@ -129,6 +130,7 @@ const AudioFxRack = memo(function AudioFxRack({ isRtl = false, enabled = true, i
             </div>
             <input
               type="range"
+              dir="ltr"
               min="0"
               max="0.85"
               step="0.02"
@@ -150,6 +152,7 @@ const AudioFxRack = memo(function AudioFxRack({ isRtl = false, enabled = true, i
             </div>
             <input
               type="range"
+              dir="ltr"
               min="0"
               max="0.70"
               step="0.02"
@@ -253,6 +256,7 @@ const AudioFxRack = memo(function AudioFxRack({ isRtl = false, enabled = true, i
             </div>
             <input
               type="range"
+              dir="ltr"
               min="0.08"
               max="0.50"
               step="0.01"
@@ -274,6 +278,7 @@ const AudioFxRack = memo(function AudioFxRack({ isRtl = false, enabled = true, i
             </div>
             <input
               type="range"
+              dir="ltr"
               min="0"
               max="0.75"
               step="0.02"
@@ -295,6 +300,7 @@ const AudioFxRack = memo(function AudioFxRack({ isRtl = false, enabled = true, i
             </div>
             <input
               type="range"
+              dir="ltr"
               min="0"
               max="0.70"
               step="0.02"

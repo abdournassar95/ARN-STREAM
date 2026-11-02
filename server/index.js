@@ -82,6 +82,8 @@ import liveRouter from './routes/live.js';
 import subtitlesRouter from './routes/subtitles.js';
 import watchPartyRouter from './routes/watch-party.js';
 import syncplayRouter from './routes/syncplay.js';
+import notificationsRouter from './routes/notifications.js';
+import licenseRouter, { licenseGateMiddleware } from './routes/licenseRoutes.js';
 import { syncplayManager } from './services/syncplay-manager.js';
 import jellyfinRouter from './routes/jellyfin/router.js';
 import { handleJellyfinSocketConnection } from './routes/jellyfin/socket.js';
@@ -101,6 +103,22 @@ import sessionManager from './services/session-manager.js';
 import dlnaController from './services/dlna-controller.js';
 import { scheduleBackups } from './services/db-backup.js';
 import { scheduleLogRotation } from './services/log-rotation.js';
+
+// Serve preset channel logos & covers statically (accessible without authentication)
+const possibleChannelDirs = [
+  path.join(__dirname, '../client/public/channels'),
+  path.join(__dirname, '../client/dist/channels'),
+  path.join(__dirname, 'client/dist/channels'),
+  path.join(process.cwd(), 'client/public/channels'),
+  path.join(process.cwd(), 'client/dist/channels')
+];
+const channelsStaticDir = possibleChannelDirs.find(p => fs.existsSync(p));
+if (channelsStaticDir) {
+  app.use('/channels', express.static(channelsStaticDir, {
+    maxAge: '30d',
+    immutable: true
+  }));
+}
 
 // Jellyfin-compatible API (served at the server root for jellyfin-web clients)
 const jellyfinApiPrefixes = [
@@ -137,10 +155,18 @@ const jellyfinApiPrefixes = [
   '/Tasks'
 ];
 app.use((req, res, next) => {
+  // Never treat static media/assets as Jellyfin API calls
+  if (/\.(svg|png|jpe?g|webp|gif|ico|css|js|map|json|woff2?|ttf|eot)$/i.test(req.path)) {
+    return next();
+  }
   const requestPath = req.path.toLowerCase();
-  const isJellyfinRequest = jellyfinApiPrefixes.some(
-    (prefix) => requestPath === prefix.toLowerCase() || requestPath.startsWith(`${prefix.toLowerCase()}/`)
-  );
+  const isJellyfinRequest = jellyfinApiPrefixes.some((prefix) => {
+    const p = prefix.toLowerCase();
+    if (p === '/channels') {
+      return requestPath === '/channels' || requestPath === '/channels/';
+    }
+    return requestPath === p || requestPath.startsWith(`${p}/`);
+  });
   if (!isJellyfinRequest) return next();
   return jellyfinRouter(req, res, next);
 });
@@ -150,6 +176,10 @@ app.use(optionalAuth);
 
 // In-memory response cache for GET endpoints (skips user-specific/stream routes)
 app.use(responseCacheMiddleware);
+
+// ARN Technology Licensing & Copy Protection Engine
+app.use('/api/license', licenseRouter);
+app.use(licenseGateMiddleware);
 
 app.use('/api/auth', authRouter);
 app.use('/api/download', downloadRouter);
@@ -168,6 +198,7 @@ app.use('/api/metadata', metadataRouter);
 app.use('/api/settings', settingsRouter);
 app.use('/api/dashboard', dashboardRouter);
 app.use('/api/handoff', handoffRouter);
+app.use('/api/notifications', notificationsRouter);
 
 // Serve user uploaded avatars
 const avatarsDir = path.join(getDataDir(), 'avatars');
@@ -302,8 +333,16 @@ app.get('/api/search', requireAuth, (req, res) => {
 
   // ─── Reusable image subquery ──────────────────────────────────────────────
   // Picks the best image per media item in a single scan:
-  //   1. is_primary=1 poster  →  2. any poster  →  3. any image
-  const imageSubquery = (mediaType) => `
+  //   1. is_primary=1 poster  →  2. any poster  →  3. any image (except artist backdrops)
+  const imageSubquery = (mediaType) => mediaType === 'artist' ? `
+    SELECT media_id, id
+    FROM images
+    WHERE media_type = 'artist' AND (image_type = 'poster' OR image_type = 'avatar')
+    ORDER BY
+      CASE WHEN is_primary = 1 THEN 0
+           ELSE 1
+      END
+  ` : `
     SELECT media_id, id
     FROM images
     WHERE media_type = '${mediaType}'
@@ -465,6 +504,7 @@ app.get('/api/search', requireAuth, (req, res) => {
 
   res.json({
     data: finalResults,
+    results: finalResults,
     prediction: topPrediction
   });
 });
@@ -866,8 +906,8 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
     }
   };
 
-  // Delayed startup check (skips if scanned in the last 24 hours)
-  setTimeout(() => runDailyScanIfNeeded('startup'), 6000);
+  // Delayed background startup check (waits 10 minutes so Windows boot completes smoothly, skips if scanned in the last 24 hours)
+  setTimeout(() => runDailyScanIfNeeded('delayed_startup'), 10 * 60 * 1000);
 
   // Hourly periodic check to trigger the 24-hour daily scan precisely when due
   setInterval(() => runDailyScanIfNeeded('daily_schedule'), 60 * 60 * 1000);
@@ -934,6 +974,7 @@ syncplayWss.on('connection', (ws, req) => {
 jellyfinWss.on('connection', handleJellyfinSocketConnection);
 
 server.on('upgrade', (req, socket, head) => {
+  socket.on('error', () => {});
   let pathname;
   try {
     pathname = new URL(req.url, `http://${req.headers.host || 'localhost'}`).pathname;
