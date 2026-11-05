@@ -14,7 +14,6 @@ import DeviceHandoffModal from './components/shared/DeviceHandoffModal.jsx';
 import RemoteControlBanner from './components/shared/RemoteControlBanner.jsx';
 import FullRemoteControlModal from './components/shared/FullRemoteControlModal.jsx';
 import MiniPlayer from './components/music/MiniPlayer.jsx';
-import SplashScreen from './components/shared/SplashScreen.jsx';
 import PWAInstallPrompt from './components/shared/PWAInstallPrompt.jsx';
 import ActivationModal from './components/shared/ActivationModal.jsx';
 import CommandPalette from './components/shared/CommandPalette.jsx';
@@ -45,7 +44,8 @@ const lazyRetry = (componentImport) =>
     }
   });
 
-import Landing from './pages/Landing.jsx';
+const Landing = lazyRetry(() => import('./pages/Landing.jsx'));
+const SplashScreen = lazyRetry(() => import('./components/shared/SplashScreen.jsx'));
 const Login = lazyRetry(() => import('./pages/Login.jsx'));
 const MoviesHome = lazyRetry(() => import('./pages/movies/Home.jsx'));
 const Library = lazyRetry(() => import('./pages/Library.jsx'));
@@ -221,7 +221,9 @@ export default function App() {
           <RemoteControlBanner />
           <FullRemoteControlModal />
           <CommandPalette />
-          <SplashScreen />
+          <Suspense fallback={null}>
+            <SplashScreen />
+          </Suspense>
           <PWAInstallPrompt />
           <ActivationModal />
         </ErrorBoundary>
@@ -229,4 +231,3 @@ export default function App() {
     </QueryClientProvider>
   );
 }
-
