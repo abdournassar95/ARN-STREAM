@@ -969,6 +969,8 @@ async function scanMusic(stats, musicRoot, lib, tracker) {
     return;
   }
 
+  const audioFiles = findAudioFilesRecursive(musicRoot, 0, 5);
+  const cachedArtists = db.prepare('SELECT id, name FROM artists').all();
   const norm = (s) => (s || '').toLowerCase().replace(/[-_.\s]+/g, ' ').trim();
 
   const insertArtist = db.prepare('INSERT OR IGNORE INTO artists (name, library_id) VALUES (?, ?)');
@@ -1587,11 +1589,15 @@ export async function scanSingleArtist(artistId) {
   }
 
   const dirsToScan = Array.from(parentDirs);
+  const library = getLibraryById(artist.library_id);
+  if (!library) {
+    throw new Error(`Library ${artist.library_id} not found`);
+  }
 
   for (const dir of dirsToScan) {
     if (fs.existsSync(dir)) {
       try {
-        await scanMusic(stats, dir, artist.library_id);
+        await scanMusic(stats, dir, library);
       } catch (e) {
         stats.errors.push(e.message);
       }
@@ -1616,10 +1622,14 @@ export async function scanSingleAlbum(albumId) {
   }
 
   const albumDir = path.dirname(track.path);
+  const library = getLibraryById(album.library_id);
+  if (!library) {
+    throw new Error(`Library ${album.library_id} not found`);
+  }
   
   if (fs.existsSync(albumDir)) {
     try {
-      await scanMusic(stats, albumDir, album.library_id);
+      await scanMusic(stats, albumDir, library);
     } catch (e) {
       stats.errors.push(e.message);
     }
