@@ -1,1 +1,0 @@
-"use strict";(self.webpackChunk=self.webpackChunk||[]).push([[3297],{26370:function(s){s.exports=JSON.parse('{"Books":"Kitablar","Movies":"Filmlər","MusicVideos":"Musiqi Videoları"}')}}]);

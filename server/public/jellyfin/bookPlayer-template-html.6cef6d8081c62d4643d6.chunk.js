@@ -1,1 +1,0 @@
-"use strict";(self.webpackChunk=self.webpackChunk||[]).push([[68672],{68104:function(e,i,o){o.r(i),i.default='<div id="bookOsdMount"></div> <div id="bookPlayerContainer" class="bookPlayerContainer"></div> '}}]);
