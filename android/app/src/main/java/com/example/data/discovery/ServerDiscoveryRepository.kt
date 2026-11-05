@@ -134,8 +134,6 @@ class ServerDiscoveryRepository(private val context: Context) {
                         body.contains("initialized", ignoreCase = true) ||
                         body.contains("\"data\"", ignoreCase = true) ||
                         body.contains("\"success\"", ignoreCase = true) ||
-                        body.contains("jellyfin", ignoreCase = true) ||
-                        body.contains("emby", ignoreCase = true) ||
                         code in 200..299
 
                 if (isArnOrMedia) {

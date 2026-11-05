@@ -2929,7 +2929,7 @@ export default function Player() {
 
 
 
-      {/* Custom Subtitle Overlay Layer (Netflix/Jellyfin Architecture) */}
+      {/* Custom subtitle overlay layer */}
       {activeCueText && selectedSubtitle && (
         <div
           id="arn-custom-subtitle-overlay"

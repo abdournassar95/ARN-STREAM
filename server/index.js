@@ -85,8 +85,6 @@ import syncplayRouter from './routes/syncplay.js';
 import notificationsRouter from './routes/notifications.js';
 import licenseRouter, { licenseGateMiddleware } from './routes/licenseRoutes.js';
 import { syncplayManager } from './services/syncplay-manager.js';
-import jellyfinRouter from './routes/jellyfin/router.js';
-import { handleJellyfinSocketConnection } from './routes/jellyfin/socket.js';
 import { optionalAuth, requireAuth, requireAdmin, getInternalKey } from './services/auth.js';
 import { responseCacheMiddleware, invalidateCache } from './middleware/response-cache.js';
 import {
@@ -119,57 +117,6 @@ if (channelsStaticDir) {
     immutable: true
   }));
 }
-
-// Jellyfin-compatible API (served at the server root for jellyfin-web clients)
-const jellyfinApiPrefixes = [
-  '/System',
-  '/Users',
-  '/UserViews',
-  '/Items',
-  '/Shows',
-  '/Artists',
-  '/Playlists',
-  '/Collections',
-  '/Search',
-  '/Genres',
-  '/MusicGenres',
-  '/Persons',
-  '/Studios',
-  '/Movies',
-  '/Trailers',
-  '/Plugins',
-  '/Devices',
-  '/Channels',
-  '/Sessions',
-  '/DisplayPreferences',
-  '/UserSettings',
-  '/Library',
-  '/Branding',
-  '/QuickConnect',
-  '/Localization',
-  '/Startup',
-  '/Videos',
-  '/Audio',
-  '/UserFavoriteItems',
-  '/UserPlayedItems',
-  '/Tasks'
-];
-app.use((req, res, next) => {
-  // Never treat static media/assets as Jellyfin API calls
-  if (/\.(svg|png|jpe?g|webp|gif|ico|css|js|map|json|woff2?|ttf|eot)$/i.test(req.path)) {
-    return next();
-  }
-  const requestPath = req.path.toLowerCase();
-  const isJellyfinRequest = jellyfinApiPrefixes.some((prefix) => {
-    const p = prefix.toLowerCase();
-    if (p === '/channels') {
-      return requestPath === '/channels' || requestPath === '/channels/';
-    }
-    return requestPath === p || requestPath.startsWith(`${p}/`);
-  });
-  if (!isJellyfinRequest) return next();
-  return jellyfinRouter(req, res, next);
-});
 
 // Apply optional auth to attach req.user if token present
 app.use(optionalAuth);
@@ -754,44 +701,6 @@ app.get('/api/metadata/musicbrainz/search', requireAdmin, async (req, res) => {
 
 app.get('/api/health', (req, res) => res.json({ data: { status: 'ok', uptime: process.uptime() } }));
 
-// Serve the Jellyfin web client (built output) under /jellyfin
-const jellyfinDistCandidates = [
-  process.env.JELLYFIN_WEB_DIST,
-  path.join(__dirname, 'public', 'jellyfin'),
-  path.join(__dirname, '..', 'client', 'jellyfin'),
-  path.join(__dirname, '..', 'jellyfin-web', 'dist'),
-  path.join(process.cwd(), 'jellyfin-web', 'dist')
-].filter(Boolean);
-const jellyfinDist = jellyfinDistCandidates.find(candidate => fs.existsSync(path.join(candidate, 'index.html')));
-
-if (jellyfinDist) {
-  console.log(`Serving Jellyfin web client from: ${jellyfinDist}`);
-  app.use('/jellyfin', express.static(jellyfinDist, {
-    index: false,
-    maxAge: '1y',
-    immutable: true,
-    setHeaders: (res, filePath) => {
-      const name = path.basename(filePath);
-      if (filePath.endsWith('.html') || name === 'config.json' || name === 'manifest.json' || name === 'serviceworker.js') {
-        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-      }
-    }
-  }));
-  app.get(['/jellyfin', '/jellyfin/*'], (req, res) => {
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.sendFile(path.join(jellyfinDist, 'index.html'));
-  });
-} else {
-  app.get(['/jellyfin', '/jellyfin/*'], (req, res) => {
-    res.status(503).json({
-      error: {
-        code: 'JELLYFIN_WEB_NOT_FOUND',
-        message: 'Jellyfin web build not found. Place the built jellyfin-web dist folder in server/public/jellyfin or set JELLYFIN_WEB_DIST.'
-      }
-    });
-  });
-}
-
 // Serve client in production
 const possibleDistPaths = [
   path.join(__dirname, '../client/dist'),
@@ -915,7 +824,6 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
 
 // Real-Time High-Speed WebSocket Server for PlayTo / Remote Control (< 5ms response time)
 const wss = new WebSocketServer({ noServer: true, maxPayload: 16384 });
-const jellyfinWss = new WebSocketServer({ noServer: true, maxPayload: 16384 });
 const syncplayWss = new WebSocketServer({ noServer: true, maxPayload: 32768 });
 
 wss.on('connection', (ws, req) => {
@@ -971,8 +879,6 @@ syncplayWss.on('connection', (ws, req) => {
   }
 });
 
-jellyfinWss.on('connection', handleJellyfinSocketConnection);
-
 server.on('upgrade', (req, socket, head) => {
   socket.on('error', () => {});
   let pathname;
@@ -987,8 +893,6 @@ server.on('upgrade', (req, socket, head) => {
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   } else if (pathname === '/ws/syncplay') {
     syncplayWss.handleUpgrade(req, socket, head, (ws) => syncplayWss.emit('connection', ws, req));
-  } else if (pathname === '/socket' || pathname === '/socket/') {
-    jellyfinWss.handleUpgrade(req, socket, head, (ws) => jellyfinWss.emit('connection', ws, req));
   } else {
     socket.destroy();
   }
@@ -1058,5 +962,3 @@ const gracefulShutdown = (signal) => {
 
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-
-
