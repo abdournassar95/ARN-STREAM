@@ -14,10 +14,11 @@ plugins {
 // Configure either `android/keystore.properties` (gitignored) or environment
 // variables: KEYSTORE_PATH, STORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD.
 val keystorePropertiesFile = rootProject.file("keystore.properties")
-val keystoreProperties = java.util.Properties().apply {
-  if (keystorePropertiesFile.exists()) {
-    keystorePropertiesFile.inputStream().use { load(it) }
-  }
+val keystoreProperties = java.util.Properties()
+if (keystorePropertiesFile.exists()) {
+  // Explicit receiver: inside `apply { }` the Kotlin DSL could not resolve
+  // Properties.load(...) and failed the whole build.
+  keystorePropertiesFile.inputStream().use { stream -> keystoreProperties.load(stream) }
 }
 
 fun signingValue(vararg keys: String): String? =
