@@ -106,10 +106,11 @@ jobs:
           if [ $status -ne 0 ]; then
             # The raw log archive is not always reachable; surface the useful lines
             # as annotations so failures stay diagnosable.
-            grep -nE "^e: |^FAILURE|What went wrong|Caused by|> Task .* FAILED|^\* |error:|requires|Unsupported|Could not (find|resolve|determine)" \
-              "$RUNNER_TEMP/gradle-debug.log" | tail -n 8 | while IFS= read -r line; do
-                echo "::error::${line}"
-              done
+            { grep -E "^e: " "$RUNNER_TEMP/gradle-debug.log" | head -n 10
+              grep -E "^\* What went wrong|^> Task .* FAILED|Caused by:" "$RUNNER_TEMP/gradle-debug.log" | head -n 3
+            } | while IFS= read -r line; do
+              echo "::error::${line}"
+            done
             exit $status
           fi
           cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/ARN-Stream-Debug.apk
