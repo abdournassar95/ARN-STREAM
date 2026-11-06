@@ -59,14 +59,27 @@
 - أندرويد: `allowBackup=false`، توقيع اختياري آمن، `versionCode=2`، `versionName=3.1.0`.
 - توحيد الإصدارات على **3.1.0** في الجذر والخادم والواجهة والمثبّت وأندرويد.
 
-## 7. الموثوقية والجودة
+## 7. إصلاح بناء أندرويد (كان معطّلاً في المستودع)
+
+أول تشغيل لـ CI كشف أن مشروع أندرويد **لا يُبنى إطلاقاً** (لم يكن هناك CI يبني سابقاً)، وتم إصلاح ستة أعطال متسلسلة:
+
+1. `build.gradle.kts`: `java.util.Properties` داخل `apply {}` لم يُحلَّل (`Unresolved reference 'util'` لأن `java` هو امتداد Gradle، وليس الحزمة) → استيراد صريح لـ `Properties` وقراءة بمستقبِل صريح.
+2. `DiscoveredServer` كان **مُعرَّفاً مرتين** في نفس الحزمة → KSP يفشل (`createNewFile`) → توحيده في نموذج واحد يوفر `host/ip/baseUrl/url/latencyMs`.
+3. ألوان غير معرَّفة (`ArnColorMovies/Shows/LiveTv/Quran/Plays/Music/Documentaries/GlassBg/GlassBorder/DeepVoid`) مستخدمة في 11 ملفاً → إضافتها إلى `Color.kt`.
+4. `PreferencesManager` كان ينقصه `authToken/userName/saveAuth/clearAuth/favoriteItems/isFavorite/toggleFavorite/removeFavorite` → تنفيذها على DataStore.
+5. اعتماديات مفقودة: `androidx.media3` (exoplayer/ui/session/datasource-okhttp) و`coil-compose` (كان معلَّقاً) → إضافتها.
+6. `android/.env.example`: الأسطر غير المعلَّقة يزرعها Secrets Plugin كـ `BuildConfig` فتُنتج Java غير صالح — والأخطر أنها كانت **ستُضمِّن كلمات مرور التوقيع داخل الـ APK** → الملف الآن تعليقات فقط.
+
+النتيجة: `assembleDebug` ينتج APK (40MB) في CI، و`assembleRelease` يُنتج APK موقّعاً عند توفّر الأسرار.
+
+## 8. الموثوقية والجودة
 
 - **24 اختبار وحدة** (`node:test`) تعمل بدون أي اعتمادية أصلية: تطبيع العربية، سياسة كلمات المرور، محدِّد المعدل، CORS/الترويسات.
 - استخراج دوال نقية إلى `server/utils/` لتكون قابلة للاختبار.
 - إصلاح ترويسة `Range`: تقييد `end`، فهم `bytes=-N`، رفض القيم غير الصالحة بـ 416، ودعم `HEAD`.
 - `predev.js` لم يعد يقتل أي عملية تستخدم المنفذ — فقط عمليات Node/ARN.
 
-## 8. ما تبقّى (متعمَّد أو مؤجّل)
+## 9. ما تبقّى (متعمَّد أو مؤجّل)
 
 1. **تاريخ Git**: الملفات أُخرجت من التتبع، لكن نسخها القديمة ما زالت في `.git`. إن كان المستودع عاماً فيجب `git filter-repo` + إعادة كتابة التاريخ + تدوير كل الأسرار (تم فعلياً على مستوى الكود).
 2. **`archiver`**: 3 تنبيهات متوسطة؛ الإصلاح المتاح يعني تخفيض الإصدار إلى 7 وقد يكسر واجهة `ZipArchive`. يحتاج اختباراً يدوياً قبل التنفيذ.
