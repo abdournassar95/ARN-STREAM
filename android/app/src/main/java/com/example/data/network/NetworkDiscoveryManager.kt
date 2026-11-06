@@ -120,7 +120,7 @@ class NetworkDiscoveryManager(private val context: Context) {
                 if (response.isSuccessful || response.code in 200..399) {
                     val latency = System.currentTimeMillis() - start
                     DiscoveredServer(
-                        ip = ip,
+                        host = ip,
                         port = port,
                         name = "ARN Stream Server ($ip)",
                         latencyMs = latency,

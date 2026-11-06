@@ -15,14 +15,22 @@ data class ServerStatusData(
     @Json(name = "hasLibraries") val hasLibraries: Boolean? = null
 )
 
+/**
+ * خادم مكتشَف عبر SSDP/mDNS أو الفحص المباشر.
+ *
+ * كان مُعرَّفاً مرتين (Models.kt + ServerModels.kt) بنفس الاسم والحزمة، وهو ما
+ * كان يُسقط البناء عند KSP (تعارض `DiscoveredServerJsonAdapter`). هذا هو
+ * التعريف الوحيد الآن، ويوفّر الحقول التي كانت مستخدمة في الملفين معاً.
+ */
 @JsonClass(generateAdapter = true)
 data class DiscoveredServer(
-    val ip: String,
-    val port: Int = 8096,
     val name: String = "ARN Stream Server",
+    val host: String,
+    val port: Int = 8096,
     val latencyMs: Long = 0L,
     val isOnline: Boolean = true
 ) {
-    val url: String
-        get() = "http://$ip:$port"
+    val ip: String get() = host
+    val baseUrl: String get() = "http://$host:$port"
+    val url: String get() = "http://$host:$port"
 }

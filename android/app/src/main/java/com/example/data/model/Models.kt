@@ -505,14 +505,6 @@ data class HandoffCommand(
 )
 
 @JsonClass(generateAdapter = true)
-data class DiscoveredServer(
-    val name: String,
-    val host: String,
-    val port: Int = 8096,
-    val baseUrl: String
-)
-
-@JsonClass(generateAdapter = true)
 data class FavoriteMediaItem(
     @Json(name = "id") val id: Int,
     @Json(name = "type") val type: String, // "movie" or "series"

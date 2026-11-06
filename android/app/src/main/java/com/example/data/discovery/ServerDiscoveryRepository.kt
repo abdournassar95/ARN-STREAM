@@ -149,8 +149,7 @@ class ServerDiscoveryRepository(private val context: Context) {
                         DiscoveredServer(
                             name = serverName,
                             host = host,
-                            port = port,
-                            baseUrl = "http://$host:$port"
+                            port = port
                         )
                     )
                     break
