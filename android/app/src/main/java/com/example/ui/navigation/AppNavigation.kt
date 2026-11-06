@@ -30,6 +30,7 @@ fun ArnStreamAppNavigation(preferencesManager: PreferencesManager) {
     val navController = rememberNavController()
     val coroutineScope = rememberCoroutineScope()
     var currentUser by remember { mutableStateOf<User?>(null) }
+    var webInitialUrl by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         coroutineScope.launch {
@@ -61,8 +62,14 @@ fun ArnStreamAppNavigation(preferencesManager: PreferencesManager) {
         composable("splash") {
             SplashScreen(
                 preferencesManager = preferencesManager,
-                onNavigateNext = { dest ->
-                    navController.navigate(dest) {
+                onNavigateToWeb = { url ->
+                    webInitialUrl = url
+                    navController.navigate("web") {
+                        popUpTo("splash") { inclusive = true }
+                    }
+                },
+                onNavigateToConnect = {
+                    navController.navigate("connect") {
                         popUpTo("splash") { inclusive = true }
                     }
                 }
@@ -72,7 +79,8 @@ fun ArnStreamAppNavigation(preferencesManager: PreferencesManager) {
         composable("connect") {
             ConnectScreen(
                 preferencesManager = preferencesManager,
-                onConnected = {
+                onServerConnected = { url ->
+                    webInitialUrl = url
                     navController.navigate("login") {
                         popUpTo("connect") { inclusive = true }
                     }
@@ -83,13 +91,9 @@ fun ArnStreamAppNavigation(preferencesManager: PreferencesManager) {
         composable("web") {
             WebClientScreen(
                 preferencesManager = preferencesManager,
+                initialUrl = webInitialUrl,
                 onSwitchServer = {
                     navController.navigate("connect") {
-                        popUpTo("web") { inclusive = true }
-                    }
-                },
-                onSwitchToNative = {
-                    navController.navigate("home") {
                         popUpTo("web") { inclusive = true }
                     }
                 }
