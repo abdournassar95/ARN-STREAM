@@ -1,9 +1,13 @@
 import { create } from 'zustand';
-import { fetchAuthStatus, loginApi, setupAdminApi } from '../api/client';
+import { fetchAuthStatus, loginApi, setupAdminApi, logoutApi } from '../api/client';
 
+/**
+ * Auth store — cookie based.
+ * The session JWT lives in an httpOnly cookie set by the server, so it is never
+ * readable from JavaScript and cannot be exfiltrated through XSS.
+ */
 export const useAuthStore = create((set, get) => ({
   user: null,
-  token: localStorage.getItem('arn_auth_token') || null,
   isAuthenticated: false,
   isInitialized: true,
   hasLibraries: true, // Default true to prevent flashing onboarding
@@ -13,11 +17,10 @@ export const useAuthStore = create((set, get) => ({
     set({ isLoading: true });
     try {
       const data = await fetchAuthStatus();
-      const token = localStorage.getItem('arn_auth_token');
 
       set({
         isInitialized: data.initialized,
-        isAuthenticated: data.authenticated && !!token,
+        isAuthenticated: Boolean(data.authenticated),
         hasLibraries: data.hasLibraries ?? true,
         user: data.user || null,
         isLoading: false
@@ -36,10 +39,8 @@ export const useAuthStore = create((set, get) => ({
 
   login: async (username, password) => {
     const res = await loginApi({ username, password });
-    if (res.token) {
-      localStorage.setItem('arn_auth_token', res.token);
+    if (res?.user) {
       set({
-        token: res.token,
         user: res.user,
         isAuthenticated: true,
         isInitialized: true,
@@ -51,10 +52,8 @@ export const useAuthStore = create((set, get) => ({
 
   setupAdmin: async ({ username, password, display_name }) => {
     const res = await setupAdminApi({ username, password, display_name });
-    if (res.token) {
-      localStorage.setItem('arn_auth_token', res.token);
+    if (res?.user) {
       set({
-        token: res.token,
         user: res.user,
         isAuthenticated: true,
         isInitialized: true,
@@ -64,10 +63,13 @@ export const useAuthStore = create((set, get) => ({
     return res;
   },
 
-  logout: () => {
-    localStorage.removeItem('arn_auth_token');
+  logout: async () => {
+    try {
+      await logoutApi();
+    } catch (err) {
+      // Ignore network errors: local state is cleared regardless.
+    }
     set({
-      token: null,
       user: null,
       isAuthenticated: false
     });

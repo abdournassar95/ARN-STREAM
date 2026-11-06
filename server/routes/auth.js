@@ -20,7 +20,10 @@ import {
   optionalAuth,
   requireAuth,
   requireAdmin,
-  requireSetupMode
+  requireSetupMode,
+  setAuthCookie,
+  clearAuthCookie,
+  validatePasswordStrength
 } from '../services/auth.js';
 
 const router = express.Router();
@@ -125,10 +128,9 @@ router.post('/setup', requireSetupMode, async (req, res) => {
       });
     }
 
-    if (password.length < 4) {
-      return res.status(400).json({
-        error: { code: 'WEAK_PASSWORD', message: 'Password must be at least 4 characters.' }
-      });
+    const policy = validatePasswordStrength(password, { minLength: 8 });
+    if (!policy.ok) {
+      return res.status(400).json({ error: { code: 'WEAK_PASSWORD', message: policy.message } });
     }
 
     const password_hash = await hashPassword(password);
@@ -146,12 +148,7 @@ router.post('/setup', requireSetupMode, async (req, res) => {
     } catch {}
 
     const token = generateToken(admin);
-    res.cookie('arn_auth_token', token, {
-      path: '/',
-      httpOnly: false,
-      sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60 * 1000
-    });
+    setAuthCookie(res, token, req);
     res.json({
       data: {
         token,
@@ -247,12 +244,7 @@ router.post('/login', async (req, res) => {
     const safeUser = findUserById(user.id);
     const token = generateToken(safeUser);
 
-    res.cookie('arn_auth_token', token, {
-      path: '/',
-      httpOnly: false,
-      sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60 * 1000
-    });
+    setAuthCookie(res, token, req);
 
     res.json({
       data: {
@@ -272,7 +264,7 @@ router.post('/login', async (req, res) => {
  * Clears session cookie
  */
 router.post('/logout', (req, res) => {
-  res.clearCookie('arn_auth_token', { path: '/' });
+  clearAuthCookie(res);
   res.json({ data: { success: true } });
 });
 
@@ -291,10 +283,12 @@ router.get('/me', requireAuth, (req, res) => {
 router.put('/password', requireAuth, async (req, res) => {
   try {
     const { current_password, new_password } = req.body;
-    if (!new_password || new_password.length < 4) {
-      return res.status(400).json({
-        error: { code: 'INVALID_PASSWORD', message: 'New password must be at least 4 characters.' }
-      });
+    const policy = validatePasswordStrength(new_password, { minLength: 8 });
+    if (!policy.ok) {
+      return res.status(400).json({ error: { code: 'INVALID_PASSWORD', message: policy.message } });
+    }
+    if (current_password && new_password && current_password === new_password) {
+      return res.status(400).json({ error: { code: 'SAME_PASSWORD', message: 'كلمة المرور الجديدة مطابقة للحالية — اختر كلمة مختلفة.' } });
     }
 
     const user = findUserByUsername(req.user.username);
@@ -310,9 +304,14 @@ router.put('/password', requireAuth, async (req, res) => {
     }
 
     const password_hash = await hashPassword(new_password);
-    updateUser(user.id, { password_hash });
+    const updated = updateUser(user.id, { password_hash });
 
-    res.json({ data: { success: true, message: 'Password updated successfully' } });
+    // updateUser() bumped token_version → all other devices are signed out.
+    // Re-issue a fresh token so this device stays logged in.
+    const freshToken = generateToken(updated || user);
+    setAuthCookie(res, freshToken, req);
+
+    res.json({ data: { success: true, token: freshToken, message: 'Password updated successfully' } });
   } catch (err) {
     console.error('[Change Password Error]', err);
     res.status(500).json({ error: { code: 'UPDATE_FAILED', message: err.message } });
@@ -355,8 +354,9 @@ router.put('/profile', requireAuth, async (req, res) => {
       if (!current_password) {
         return res.status(400).json({ error: { code: 'CURRENT_PASSWORD_REQUIRED', message: 'Current password is required to set a new password.' } });
       }
-      if (new_password.length < 4) {
-        return res.status(400).json({ error: { code: 'WEAK_PASSWORD', message: 'New password must be at least 4 characters.' } });
+      const policy = validatePasswordStrength(new_password, { minLength: 8 });
+      if (!policy.ok) {
+        return res.status(400).json({ error: { code: 'WEAK_PASSWORD', message: policy.message } });
       }
       const fullUser = findUserByUsername(user.username);
       const isMatch = await verifyPassword(current_password, fullUser.password_hash);
@@ -367,6 +367,14 @@ router.put('/profile', requireAuth, async (req, res) => {
     }
 
     const updated = updateUser(user.id, updates);
+
+    // If the password changed, other sessions are revoked — refresh this one.
+    if (updates.password_hash) {
+      const freshToken = generateToken(updated || user);
+      setAuthCookie(res, freshToken, req);
+      return res.json({ data: updated, token: freshToken });
+    }
+
     res.json({ data: updated });
   } catch (err) {
     console.error('[Update Profile Error]', err);
@@ -411,10 +419,9 @@ router.post('/users', requireAdmin, async (req, res) => {
       });
     }
 
-    if (password.length < 4) {
-      return res.status(400).json({
-        error: { code: 'WEAK_PASSWORD', message: 'Password must be at least 4 characters.' }
-      });
+    const policy = validatePasswordStrength(password, { minLength: 8 });
+    if (!policy.ok) {
+      return res.status(400).json({ error: { code: 'WEAK_PASSWORD', message: policy.message } });
     }
 
     const existing = findUserByUsername(username);
@@ -487,8 +494,9 @@ router.put('/users/:id', requireAdmin, async (req, res) => {
       updates.is_active = Boolean(req.body.is_active);
     }
     if (req.body.password) {
-      if (req.body.password.length < 4) {
-        return res.status(400).json({ error: { code: 'WEAK_PASSWORD', message: 'Password must be at least 4 characters.' } });
+      const policy = validatePasswordStrength(req.body.password, { minLength: 8 });
+      if (!policy.ok) {
+        return res.status(400).json({ error: { code: 'WEAK_PASSWORD', message: policy.message } });
       }
       updates.password_hash = await hashPassword(req.body.password);
     }

@@ -1,0 +1,155 @@
+name: CI — Build, Test & Release
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # Web: server sanity checks, unit tests, production frontend build
+  # ─────────────────────────────────────────────────────────────
+  web:
+    name: Web (server tests + client build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            client/package-lock.json
+            server/package-lock.json
+
+      - name: Server — syntax check & unit tests (no native deps needed)
+        run: |
+          node --check server/index.js
+          node --check server/db.js
+          node --check server/services/auth.js
+          node --test server/tests/*.test.js
+
+      - name: Server — dependency audit (fails on high/critical)
+        working-directory: server
+        run: npm audit --package-lock-only --audit-level=high
+
+      - name: Client — install & build
+        working-directory: client
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Client — dependency audit (fails on high/critical)
+        working-directory: client
+        run: npm audit --audit-level=high
+
+      - name: Upload web build
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-dist
+          path: client/dist
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────
+  # Android: debug APK always, signed release when secrets are set
+  # ─────────────────────────────────────────────────────────────
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    needs: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Restore signing keystore (never committed to Git)
+        id: keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "path=$RUNNER_TEMP/release.jks" >> "$GITHUB_OUTPUT"
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::ANDROID_KEYSTORE_BASE64 is not configured — release APK will be skipped."
+          fi
+
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+          cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/ARN-Stream-Debug.apk
+
+      - name: Build signed release APK
+        if: ${{ steps.keystore.outputs.available == 'true' }}
+        working-directory: android
+        env:
+          KEYSTORE_PATH: ${{ steps.keystore.outputs.path }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          ./gradlew assembleRelease --no-daemon --stacktrace
+          cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/ARN-Stream-Release.apk
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: arn-stream-android
+          path: |
+            android/app/build/outputs/apk/debug/ARN-Stream-Debug.apk
+            android/app/build/outputs/apk/release/ARN-Stream-Release.apk
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ─────────────────────────────────────────────────────────────
+  # Release: only on version tags, only if the signed APK exists
+  # ─────────────────────────────────────────────────────────────
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs: [web, android]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: arn-stream-android
+          path: dist-apk
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ARN Stream ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          files: |
+            dist-apk/ARN-Stream-Release.apk
+            dist-apk/ARN-Stream-Debug.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

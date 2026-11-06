@@ -18,14 +18,32 @@ __pycache__/
 *$py.class
 *.spec
 
-# Environment & credentials
+# Environment & credentials — NEVER commit these
 .env
 .env.local
 .env.*.local
 *.pfx
+*.p12
+*.jks
+*.keystore
+keystore.properties
+android/keystore.properties
+cert/*.pfx
+cert/*.cer
+
+# Runtime data, databases & caches (user data must never be committed)
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+server/data/
+data/
+backups/
+logs/
+*.log
 
 # Vite temporary files & logs
-*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -35,6 +53,7 @@ client/vite.config.js.timestamp-*.mjs
 # OS & Editor temporary files
 .DS_Store
 Thumbs.db
+desktop.ini
 *.swp
 *.swo
 .idea/
@@ -54,7 +73,10 @@ android/app/*.iml
 *.apk
 *.aab
 
+# Test / tooling caches
+coverage/
+.nyc_output/
+.eslintcache
 
-# Database backups
-backups/
-*.db
+# Vendored third-party web client (GPL) — fetched on demand, see docs/THIRD_PARTY.md
+# server/public/jellyfin/

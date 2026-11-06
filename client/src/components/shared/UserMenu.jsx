@@ -64,9 +64,12 @@ export default function UserMenu({ isSidebar = false, avatarSize = 32, density =
 
   if (!user) return null;
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login', { replace: true });
+  const handleLogout = async () => {
+    try {
+      await logout(); // clears the httpOnly session cookie server-side
+    } finally {
+      navigate('/login', { replace: true });
+    }
   };
 
   const roleLabels = {

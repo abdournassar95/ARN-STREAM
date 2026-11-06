@@ -1,6 +1,9 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import compression from 'compression';
+import { securityHeadersMiddleware, buildCorsOptions } from './middleware/security.js';
+import { createRateLimitMiddleware } from './middleware/rate-limit.js';
 import path from 'path';
 import fs from 'fs';
 import { spawn } from 'child_process';
@@ -26,7 +29,15 @@ const PORT = process.env.PORT || 8096; // ARN Stream Server
 // Track active streams globally for the dashboard
 global.activeStreams = {};
 
-app.use(cors());
+// Reverse-proxy support is opt-in only (trusting X-Forwarded-* blindly would
+// let clients spoof their IP and bypass rate limiting).
+app.set('trust proxy', process.env.TRUST_PROXY === 'true' ? 1 : false);
+
+// CORS: same-host + loopback dev + explicit CORS_ORIGINS allow-list (no more '*').
+app.use(cors(buildCorsOptions()));
+
+// OWASP security headers (+ CSP in production).
+app.use(securityHeadersMiddleware());
 
 // HTTP Compression — يقلل حجم استجابات JSON/HTML بنسبة 70-80%
 app.use(compression({
@@ -40,23 +51,52 @@ app.use(compression({
   }
 }));
 
-// Standard OWASP Security Headers
+// Tight default body limits (uploads use multer with their own limits).
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+// Request logging: never log query strings — they may carry media tokens.
 app.use((req, res, next) => {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-  res.setHeader('X-XSS-Protection', '1; mode=block');
-  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.on('finish', () => {
+    const ms = Date.now() - (req._arnStart || Date.now());
+    // originalUrl keeps the full mount path; strip the query string (may hold tokens).
+    const pathOnly = String(req.originalUrl || req.url || '').split('?')[0];
+    console.log(`[API] ${req.method} ${pathOnly} → ${res.statusCode} (${ms}ms)`);
+  });
+  req._arnStart = Date.now();
   next();
 });
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
-
-// Logging
-app.use((req, res, next) => {
-  console.log(`[API] ${req.method} ${req.url}`);
-  next();
+// ── Rate limiting ─────────────────────────────────────────────────────────
+// Media/streaming routes are excluded: players issue many legitimate range
+// requests per second and have dedicated limits where needed.
+const globalApiLimiter = createRateLimitMiddleware({
+  windowMs: 60_000,
+  max: 600,
+  skip: (req) => (
+    req.path.startsWith('/api/stream') ||
+    req.path.startsWith('/api/live/proxy') ||
+    req.path.startsWith('/api/image') ||
+    req.path.startsWith('/api/avatars')
+  )
 });
+app.use('/api', globalApiLimiter);
+
+// Auth endpoints: slow down brute-force attempts (in addition to the
+// per-username lockout implemented in routes/auth.js).
+app.use('/api/auth/login', createRateLimitMiddleware({
+  windowMs: 15 * 60_000,
+  max: 50,
+  message: 'عدد محاولات الدخول كبير جداً. يرجى المحاولة بعد 15 دقيقة.'
+}));
+app.use('/api/auth/setup', createRateLimitMiddleware({ windowMs: 60 * 60_000, max: 10 }));
+
+// IPTV proxy: public by design, so it needs its own abuse ceiling.
+app.use('/api/live/proxy', createRateLimitMiddleware({
+  windowMs: 60_000,
+  max: 1200,
+  message: 'تم تجاوز الحد المسموح لطلبات البث المباشر. يرجى المحاولة بعد قليل.'
+}));
 
 // Import routes
 import libraryRouter from './routes/library.js';
@@ -87,7 +127,7 @@ import licenseRouter, { licenseGateMiddleware } from './routes/licenseRoutes.js'
 import { syncplayManager } from './services/syncplay-manager.js';
 import jellyfinRouter from './routes/jellyfin/router.js';
 import { handleJellyfinSocketConnection } from './routes/jellyfin/socket.js';
-import { optionalAuth, requireAuth, requireAdmin, getInternalKey } from './services/auth.js';
+import { optionalAuth, requireAuth, requireAdmin, getInternalKey, safeCompare, resolveUserFromToken, resolveRequestUser } from './services/auth.js';
 import { responseCacheMiddleware, invalidateCache } from './middleware/response-cache.js';
 import {
   startDlna,
@@ -636,19 +676,19 @@ async function executeFullScan(isPeriodic = false) {
   }
 }
 
-// GET /api/scan/status -> Current scan state
-app.get('/api/scan/status', (req, res) => {
-  res.json({ data: currentScanState });
+// GET /api/scan/status -> Current scan state (authenticated: leaks library names)
+app.get('/api/scan/status', requireAuth, (req, res) => {
+  res.json({ data: { ...currentScanState, isInternal: Boolean(req.user?.isInternal) } });
 });
 
 app.post('/api/scan', (req, res, next) => {
-  const clientIp = req.ip || req.socket?.remoteAddress || req.connection?.remoteAddress || '';
-  const isLoopback = clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === '::ffff:127.0.0.1' || req.hostname === 'localhost' || req.hostname === '127.0.0.1';
-  const hasNoExternalOrigin = !req.headers.origin && !req.headers.referer;
+  // The desktop tray authenticates with the loopback-only internal key.
+  // Anything else must be an authenticated administrator.
+  const socketIp = req.socket?.remoteAddress || '';
+  const isLoopback = socketIp === '127.0.0.1' || socketIp === '::1' || socketIp === '::ffff:127.0.0.1';
   const internalKey = req.headers['x-arn-internal-key'];
 
-  // Automatically authenticate if request is from local desktop system tray
-  if (isLoopback && ((internalKey && internalKey === getInternalKey()) || hasNoExternalOrigin)) {
+  if (isLoopback && internalKey && safeCompare(internalKey, getInternalKey())) {
     req.user = { id: 1, username: 'admin', role: 'admin', is_active: 1, isInternal: true };
     return next();
   }
@@ -926,9 +966,29 @@ wss.on('connection', (ws, req) => {
       ws.close(4001, 'deviceId required');
       return;
     }
+
+    // Authenticate the socket: browser clients send the httpOnly cookie with the
+    // handshake, native clients may pass ?token=. Anonymous sockets are rejected.
+    const socketReq = { headers: req.headers, path: url.pathname, query: {}, socket: req.socket };
+    const user = resolveRequestUser(socketReq) || resolveUserFromToken(url.searchParams.get('token') || '');
+    if (!user) {
+      ws.close(4401, 'authentication required');
+      return;
+    }
+
+    // A device may only be attached by its owner (admins may take over).
+    const existing = sessionManager.getSession(deviceId);
+    if (existing?.userId && String(existing.userId) !== String(user.id) && user.role !== 'admin') {
+      ws.close(4403, 'device is owned by another user');
+      return;
+    }
+
     sessionManager.attachWebSocket(deviceId, ws, {
       ip: req.socket.remoteAddress,
-      userAgent: req.headers['user-agent'] || ''
+      userAgent: req.headers['user-agent'] || '',
+      userId: user.id,
+      userName: user.username,
+      userDisplayName: user.display_name || user.username
     });
   } catch (err) {
     console.warn('[WS Connection Error]:', err.message);
@@ -940,11 +1000,20 @@ syncplayWss.on('connection', (ws, req) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     const roomId = url.searchParams.get('roomId');
-    const userId = url.searchParams.get('userId') || `guest-${Date.now()}`;
     const deviceId = url.searchParams.get('deviceId');
     const connectionId = url.searchParams.get('connectionId');
-    const username = decodeURIComponent(url.searchParams.get('username') || 'ضيف ARN');
-    const avatar = url.searchParams.get('avatar') || null;
+
+    // Identity comes from the signed token when available; query params are only
+    // honoured for anonymous guests (and can no longer impersonate a logged-in user).
+    const socketReq = { headers: req.headers, path: url.pathname, query: {}, socket: req.socket };
+    const authUser = resolveRequestUser(socketReq) || resolveUserFromToken(url.searchParams.get('token') || '');
+    // Guests always get a throw-away id: accepting a client-supplied userId would
+    // let an anonymous socket impersonate a registered account inside a room.
+    const userId = authUser ? String(authUser.id) : `guest-${crypto.randomUUID()}`;
+    const username = authUser
+      ? (authUser.display_name || authUser.username)
+      : String(decodeURIComponent(url.searchParams.get('username') || 'ضيف ARN')).slice(0, 40);
+    const avatar = authUser?.avatar || url.searchParams.get('avatar') || null;
 
     if (!roomId) {
       ws.close(4001, 'roomId required');

@@ -1095,7 +1095,7 @@ export default function MiniPlayer() {
 
       <audio
         ref={audioRef}
-        src={currentTrack ? `/api/stream/track/${currentTrack.id}${localStorage.getItem('arn_auth_token') ? `?token=${encodeURIComponent(localStorage.getItem('arn_auth_token'))}` : ''}` : undefined}
+        src={currentTrack ? `/api/stream/track/${currentTrack.id}` : undefined}
         preload="auto"
         crossOrigin="anonymous"
         onLoadedMetadata={handleLoadedMetadata}

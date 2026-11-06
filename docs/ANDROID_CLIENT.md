@@ -85,7 +85,7 @@ android/app/src/main/
 
 ## 🛠️ 5. البناء التلقائي والتوقيع الرقمي (CI/CD Pipeline)
 
-يتم بناء حزم الـ APK بصيغة Release تلقائياً عبر منصة GitHub Actions من خلال ملف التكوين [.github/workflows/build-android.yml](file:///e:/مشاريعي/ARN-Stream/.github/workflows/build-android.yml):
+يتم بناء حزم الـ APK بصيغة Release تلقائياً عبر منصة GitHub Actions من خلال ملف التكوين [.github/workflows/ci.yml](../.github/workflows/ci.yml):
 1. إعداد بيئة Java 17 وتثبيت Android SDK 36.
 2. بناء حزمة التطبيق عبر أمر `./gradlew assembleRelease`.
 3. توقيع الحزمة تلقائياً ونشرها كـ Release Artifact جاهز للتحميل المباشر.

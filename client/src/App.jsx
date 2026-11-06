@@ -17,10 +17,6 @@ import MiniPlayer from './components/music/MiniPlayer.jsx';
 import PWAInstallPrompt from './components/shared/PWAInstallPrompt.jsx';
 import ActivationModal from './components/shared/ActivationModal.jsx';
 import CommandPalette from './components/shared/CommandPalette.jsx';
-import { syncAuthCookie } from './api/client.js';
-
-syncAuthCookie();
-
 // Safely import lazy components with automatic page reload if chunk hash changed after an update
 const lazyRetry = (componentImport) =>
   lazy(async () => {

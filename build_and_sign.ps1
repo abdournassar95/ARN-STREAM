@@ -108,9 +108,15 @@ if (-not $arnCert) {
         "e:\مشاريعي\ARN_Cert\ARN_Technology_CodeSigning.pfx",
         "d:\مشاريعي\ARN_Cert\ARN_Technology_CodeSigning.pfx"
     )
+    # The PFX password must come from the environment (never hard-coded in the repo).
+    $pfxPassword = $env:ARN_PFX_PASSWORD
     foreach ($pfx in $pfxCandidates) {
         if (Test-Path $pfx) {
-            $pwd = ConvertTo-SecureString "ARN2026" -AsPlainText -Force
+            if (-not $pfxPassword) {
+                Write-Warning "Found $pfx but ARN_PFX_PASSWORD is not set - skipping import."
+                break
+            }
+            $pwd = ConvertTo-SecureString $pfxPassword -AsPlainText -Force
             $arnCert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation "Cert:\CurrentUser\My" -Password $pwd -Exportable -ErrorAction SilentlyContinue
             if ($arnCert) { break }
         }
@@ -126,16 +132,11 @@ if ($arnCert) {
     attrib -h "cert\ARN_Technology_Root.cer" 2>$null
     Write-Host "  Certificate exported to cert\ARN_Technology_Root.cer." -ForegroundColor Green
 
-    # Ensure certificate is in Root & TrustedPublisher
-    $inRoot = Get-Item "Cert:\CurrentUser\Root\$certThumbprint" -ErrorAction SilentlyContinue
-    $inPub = Get-Item "Cert:\CurrentUser\TrustedPublisher\$certThumbprint" -ErrorAction SilentlyContinue
-    if (-not $inRoot) {
-        & certutil.exe -addstore -user -f "Root" "cert\ARN_Technology_Root.cer" | Out-Null
-    }
-    if (-not $inPub) {
-        & certutil.exe -addstore -user -f "TrustedPublisher" "cert\ARN_Technology_Root.cer" | Out-Null
-    }
-    Write-Host "  Certificate is active and trusted on current system." -ForegroundColor Green
+    # SECURITY: the build script never modifies the Windows trust stores.
+    # Trusting a self-signed root silently would weaken the whole machine and
+    # triggers antivirus heuristics. Use a publicly-trusted (EV) code-signing
+    # certificate to avoid SmartScreen warnings instead.
+    Write-Host "  Certificate exported for signing only (trust stores untouched)." -ForegroundColor Yellow
 } else {
     Write-Warning "Could not find active ARN Technology certificate with private key in CurrentUser\My!"
 }

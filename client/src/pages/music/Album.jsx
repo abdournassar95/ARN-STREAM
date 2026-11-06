@@ -144,9 +144,7 @@ export default function Album() {
     try {
       const res = await fetch(`/api/albums/${id}/scan`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
+        credentials: 'same-origin'
       });
       if (!res.ok) throw new Error('Scan failed');
       await qc.invalidateQueries({ queryKey: ['album', id] });

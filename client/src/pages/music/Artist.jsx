@@ -96,9 +96,7 @@ export default function Artist() {
     try {
       const res = await fetch(`/api/artists/${id}/scan`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
+        credentials: 'same-origin'
       });
       if (!res.ok) throw new Error('Scan failed');
       await queryClient.invalidateQueries({ queryKey: ['artist', id] });

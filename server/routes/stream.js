@@ -19,21 +19,20 @@ async function streamFile(filePath, req, res) {
   try {
     await fs.promises.access(filePath, fs.constants.R_OK);
   } catch {
-    if (filePath.startsWith('D:\\')) {
-      return res.status(404).json({ error: { code: 'FILE_NOT_FOUND', message: `Media file not found: ${filePath}` } });
-    }
     return res.status(404).json({ error: { code: 'FILE_NOT_FOUND', message: 'File not found' } });
   }
 
   let stat;
   try {
     stat = await fs.promises.stat(filePath);
-  } catch (err) {
+  } catch {
     return res.status(500).json({ error: { code: 'STAT_ERROR', message: 'Cannot read file info' } });
   }
 
   const fileSize = stat.size;
-  const range = req.headers.range;
+  if (!Number.isFinite(fileSize) || fileSize <= 0) {
+    return res.status(404).json({ error: { code: 'FILE_NOT_FOUND', message: 'Empty media file' } });
+  }
 
   const ext = path.extname(filePath).toLowerCase();
   const mimeMap = {
@@ -43,106 +42,131 @@ async function streamFile(filePath, req, res) {
     '.m4a': 'audio/mp4', '.ogg': 'audio/ogg', '.wma': 'audio/x-ms-wma', '.aac': 'audio/aac'
   };
   const contentType = mimeMap[ext] || 'application/octet-stream';
+  const baseHeaders = {
+    'Accept-Ranges': 'bytes',
+    'Content-Type': contentType,
+    'Cache-Control': 'private, no-cache',
+    'X-Stream-Mode': 'direct'
+  };
 
-  if (range) {
-    const parts = range.replace(/bytes=/, "").split("-");
-    const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-
-    if (start >= fileSize) {
-      res.status(416).set({ 'Content-Range': `bytes */${fileSize}` }).end();
-      return;
-    }
-    const chunksize = (end - start) + 1;
-    const file = fs.createReadStream(filePath, { start, end });
-    const streamId = req.ip + '-' + path.basename(filePath);
-
-    let isCleanedUp = false;
-    const cleanup = () => {
-      if (isCleanedUp) return;
-      isCleanedUp = true;
-      delete global.activeStreams?.[streamId];
-      if (file && !file.destroyed) {
-        file.destroy();
-      }
-    };
-
-    file.on('error', (err) => {
-      cleanup();
-      console.error(`[Stream Error] ${filePath}:`, err.message);
-      if (!res.headersSent) {
-        res.status(500).json({ error: { code: 'STREAM_ERROR', message: 'Error reading file' } });
-      } else {
-        res.end();
-      }
-    });
-
-    file.on('end', cleanup);
-    file.on('close', cleanup);
-
-    res.writeHead(206, {
-      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-      'Accept-Ranges': 'bytes',
-      'Content-Length': chunksize,
-      'Content-Type': contentType,
-      'Cache-Control': 'no-cache',
-      'X-Stream-Mode': 'direct'
-    });
-
-    global.activeStreams = global.activeStreams || {};
-    global.activeStreams[streamId] = { id: streamId, type: 'direct', filePath, startedAt: new Date() };
-
-    res.on('close', cleanup);
-    res.on('finish', cleanup);
-    res.on('error', cleanup);
-    req.on('close', cleanup);
-
-    file.pipe(res);
-  } else {
-    res.writeHead(200, {
-      'Content-Length': fileSize,
-      'Content-Type': contentType,
-      'Accept-Ranges': 'bytes',
-      'Cache-Control': 'no-cache',
-      'X-Stream-Mode': 'direct'
-    });
-
-    const file = fs.createReadStream(filePath);
-    const streamId = req.ip + '-' + path.basename(filePath);
-
-    let isCleanedUp = false;
-    const cleanup = () => {
-      if (isCleanedUp) return;
-      isCleanedUp = true;
-      delete global.activeStreams?.[streamId];
-      if (file && !file.destroyed) {
-        file.destroy();
-      }
-    };
-
-    file.on('error', (err) => {
-      cleanup();
-      console.error(`[Stream Error] ${filePath}:`, err.message);
-      if (!res.headersSent) {
-        res.status(500).json({ error: { code: 'STREAM_ERROR', message: 'Error reading file' } });
-      } else {
-        res.end();
-      }
-    });
-
-    file.on('end', cleanup);
-    file.on('close', cleanup);
-
-    global.activeStreams = global.activeStreams || {};
-    global.activeStreams[streamId] = { id: streamId, type: 'direct', filePath, startedAt: new Date() };
-
-    res.on('close', cleanup);
-    res.on('finish', cleanup);
-    res.on('error', cleanup);
-    req.on('close', cleanup);
-
-    file.pipe(res);
+  // HEAD requests only need metadata.
+  if (req.method === 'HEAD') {
+    res.writeHead(200, { ...baseHeaders, 'Content-Length': fileSize });
+    return res.end();
   }
+
+  const rangeHeader = req.headers.range;
+
+  // No Range header → full body (200).
+  if (!rangeHeader) {
+    const file = fs.createReadStream(filePath);
+    const streamId = `${req.ip}-${path.basename(filePath)}`;
+
+    let cleanedUp = false;
+    const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      delete global.activeStreams?.[streamId];
+      if (file && !file.destroyed) file.destroy();
+    };
+
+    file.on('error', (err) => {
+      cleanup();
+      console.error(`[Stream Error] ${filePath}:`, err.message);
+      if (!res.headersSent) {
+        res.status(500).json({ error: { code: 'STREAM_ERROR', message: 'Error reading file' } });
+      } else {
+        res.end();
+      }
+    });
+    file.on('end', cleanup);
+    file.on('close', cleanup);
+    res.on('close', cleanup);
+    res.on('finish', cleanup);
+    res.on('error', cleanup);
+    req.on('close', cleanup);
+
+    global.activeStreams = global.activeStreams || {};
+    global.activeStreams[streamId] = { id: streamId, type: 'direct', filePath, startedAt: new Date() };
+
+    res.writeHead(200, { ...baseHeaders, 'Content-Length': fileSize });
+    return file.pipe(res);
+  }
+
+  // ── Range request (RFC 7233, single range only) ──────────────────────────
+  const match = /^bytes=(\d*)-(\d*)$/.exec(String(rangeHeader).trim());
+  if (!match) {
+    return res
+      .status(416)
+      .set({ 'Content-Range': `bytes */${fileSize}`, 'Accept-Ranges': 'bytes' })
+      .end();
+  }
+
+  const hasStart = match[1] !== '';
+  const hasEnd = match[2] !== '';
+  let start;
+  let end;
+
+  if (!hasStart) {
+    // Suffix range: bytes=-N (last N bytes)
+    const suffixLength = Number.parseInt(match[2], 10);
+    if (!Number.isFinite(suffixLength) || suffixLength <= 0) {
+      return res.status(416).set({ 'Content-Range': `bytes */${fileSize}` }).end();
+    }
+    start = Math.max(0, fileSize - suffixLength);
+    end = fileSize - 1;
+  } else {
+    start = Number.parseInt(match[1], 10);
+    end = hasEnd ? Number.parseInt(match[2], 10) : fileSize - 1;
+
+    if (!Number.isFinite(start) || start < 0 || start >= fileSize || !Number.isFinite(end) || end < start) {
+      return res
+        .status(416)
+        .set({ 'Content-Range': `bytes */${fileSize}`, 'Accept-Ranges': 'bytes' })
+        .end();
+    }
+    // Clamp out-of-bounds end instead of advertising a wrong Content-Length.
+    end = Math.min(end, fileSize - 1);
+  }
+
+  const chunksize = end - start + 1;
+  const file = fs.createReadStream(filePath, { start, end });
+  const streamId = `${req.ip}-${path.basename(filePath)}`;
+
+  let cleanedUp = false;
+  const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    delete global.activeStreams?.[streamId];
+    if (file && !file.destroyed) file.destroy();
+  };
+
+  file.on('error', (err) => {
+    cleanup();
+    console.error(`[Stream Error] ${filePath}:`, err.message);
+    if (!res.headersSent) {
+      res.status(500).json({ error: { code: 'STREAM_ERROR', message: 'Error reading file' } });
+    } else {
+      res.end();
+    }
+  });
+  file.on('end', cleanup);
+  file.on('close', cleanup);
+  res.on('close', cleanup);
+  res.on('finish', cleanup);
+  res.on('error', cleanup);
+  req.on('close', cleanup);
+
+  global.activeStreams = global.activeStreams || {};
+  global.activeStreams[streamId] = { id: streamId, type: 'direct', filePath, startedAt: new Date() };
+
+  res.writeHead(206, {
+    ...baseHeaders,
+    'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+    'Content-Length': chunksize
+  });
+
+  return file.pipe(res);
 }
 
 /**

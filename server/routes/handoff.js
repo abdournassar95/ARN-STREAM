@@ -17,6 +17,21 @@ import { getLocalIpAddress } from '../services/dlna.js';
 const router = express.Router();
 router.use(optionalAuth);
 
+// Every PlayTo / remote-control endpoint requires a signed-in user.
+router.use(requireAuth);
+
+/**
+ * A session is accessible to its owner and to administrators. DLNA renderers and
+ * legacy sessions without an owner stay discoverable so casting to a TV keeps working.
+ */
+function canAccessSession(session, user) {
+  if (!session) return false;
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  if (session.userId === undefined || session.userId === null || session.userId === 'guest') return true;
+  return String(session.userId) === String(user.id);
+}
+
 export function broadcastToAll(eventType, data) {
   sessionManager.broadcast(eventType, data);
 }
@@ -28,9 +43,11 @@ router.post('/register', (req, res) => {
     return res.status(400).json({ error: { code: 'INVALID_DEVICE', message: 'deviceId is required' } });
   }
 
-  const userId = req.user?.id || req.body.userId || 'guest';
-  const resolvedUserName = req.user?.username || userName || null;
-  const resolvedDisplayName = req.user?.display_name || userDisplayName || resolvedUserName || null;
+  // Ownership always comes from the authenticated token — never from the body.
+  const userId = req.user.id;
+  const resolvedUserName = req.user.username || userName || null;
+  const resolvedDisplayName = req.user.display_name || userDisplayName || resolvedUserName || null;
+
 
   const session = sessionManager.registerSession({
     deviceId,
@@ -63,7 +80,8 @@ router.get('/devices', (req, res) => {
   dlnaController.triggerSearch();
 
   const currentDeviceId = req.query.currentDeviceId;
-  const devicesList = sessionManager.getDevicesList(currentDeviceId);
+  const devicesList = sessionManager.getDevicesList(currentDeviceId)
+    .filter((device) => req.user.role === 'admin' || !device.userId || String(device.userId) === String(req.user.id));
 
   res.json({ data: devicesList });
 });
@@ -73,6 +91,11 @@ router.get('/events', (req, res) => {
   const deviceId = req.query.deviceId;
   if (!deviceId) {
     return res.status(400).json({ error: { message: 'deviceId query param is required' } });
+  }
+
+  const targetSession = sessionManager.getSession(deviceId);
+  if (targetSession && !canAccessSession(targetSession, req.user)) {
+    return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'هذا الجهاز مرتبط بحساب آخر' } });
   }
 
   res.setHeader('Content-Type', 'text/event-stream');
@@ -123,6 +146,9 @@ router.post('/transfer', requireAuth, async (req, res) => {
   const targetSession = sessionManager.getSession(targetDeviceId);
   if (!targetSession) {
     return res.status(404).json({ error: { code: 'DEVICE_OFFLINE', message: 'الجهاز المستهدف غير متصل حالياً' } });
+  }
+  if (!canAccessSession(targetSession, req.user)) {
+    return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'هذا الجهاز مرتبط بحساب آخر' } });
   }
 
   // Track controller relationship
@@ -189,6 +215,9 @@ router.post('/command', requireAuth, async (req, res) => {
   }
 
   const targetSession = sessionManager.getSession(targetDeviceId);
+  if (targetSession && !canAccessSession(targetSession, req.user)) {
+    return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'هذا الجهاز مرتبط بحساب آخر' } });
+  }
 
   // 1. If target is DLNA Smart TV, execute UPnP SOAP actions
   if (targetSession && targetSession.isDlna) {
@@ -240,6 +269,11 @@ router.post('/state', (req, res) => {
   const reportingDeviceId = fromDeviceId || deviceId;
   if (!state) return res.status(400).json({ error: { message: 'state is required' } });
 
+  const reportingSession = reportingDeviceId ? sessionManager.getSession(reportingDeviceId) : null;
+  if (reportingSession && !canAccessSession(reportingSession, req.user)) {
+    return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'هذا الجهاز مرتبط بحساب آخر' } });
+  }
+
   // Update in sessionManager (automatically notifies all registered controllers in < 5ms)
   if (reportingDeviceId) {
     sessionManager.updatePlaybackState(reportingDeviceId, state);
@@ -263,6 +297,9 @@ router.get('/state/:deviceId', (req, res) => {
   const session = sessionManager.getSession(req.params.deviceId);
   if (!session) {
     return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Device not found' } });
+  }
+  if (!canAccessSession(session, req.user)) {
+    return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'هذا الجهاز مرتبط بحساب آخر' } });
   }
 
   res.json({

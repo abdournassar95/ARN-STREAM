@@ -65,16 +65,10 @@ try {
   console.warn('[Database] تنبيه الفحص السريع:', e.message);
 }
 
-export function normalizeArabic(text) {
-  if (!text || typeof text !== 'string') return '';
-  return text
-    .trim()
-    .toLowerCase()
-    .replace(/[أإآٱ]/g, 'ا')
-    .replace(/ة/g, 'ه')
-    .replace(/ى/g, 'ي')
-    .replace(/[\u064B-\u065F\u0670]/g, '');
-}
+import { normalizeArabic } from './utils/normalize-arabic.js';
+
+// Re-exported for backwards compatibility (routes/search import it from here).
+export { normalizeArabic };
 
 db.function('norm_ar', (str) => normalizeArabic(str));
 
@@ -378,6 +372,7 @@ CREATE TABLE IF NOT EXISTS users (
   can_download BOOLEAN DEFAULT 1,
   can_cast BOOLEAN DEFAULT 1,
   is_active BOOLEAN DEFAULT 1,
+  token_version INTEGER DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   last_login DATETIME
 );
@@ -394,6 +389,8 @@ CREATE TABLE IF NOT EXISTS user_favorites (
 try { db.exec('ALTER TABLE users ADD COLUMN can_download BOOLEAN DEFAULT 1;'); } catch {}
 try { db.exec('ALTER TABLE users ADD COLUMN can_cast BOOLEAN DEFAULT 1;'); } catch {}
 try { db.exec('ALTER TABLE users ADD COLUMN show_on_login BOOLEAN DEFAULT 1;'); } catch {}
+try { db.exec('ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 0;'); } catch {}
+try { db.exec('ALTER TABLE users ADD COLUMN can_cast BOOLEAN DEFAULT 1;'); } catch {}
 try { db.exec('CREATE INDEX IF NOT EXISTS idx_user_favorites ON user_favorites(user_id, media_type);'); } catch {}
 try { db.exec('ALTER TABLE playlists ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;'); } catch {}
 try { db.exec('CREATE INDEX IF NOT EXISTS idx_playlists_user ON playlists(user_id);'); } catch {}
@@ -858,7 +855,7 @@ export function countUsers() {
 }
 
 export function findUserById(id) {
-  const user = db.prepare('SELECT id, username, display_name, avatar, role, allowed_libraries, can_download, can_cast, show_on_login, is_active, created_at, last_login FROM users WHERE id = ?').get(id);
+  const user = db.prepare('SELECT id, username, display_name, avatar, role, allowed_libraries, can_download, can_cast, show_on_login, is_active, token_version, created_at, last_login FROM users WHERE id = ?').get(id);
   if (!user) return null;
   return {
     ...user,
@@ -885,7 +882,7 @@ export function findUserByUsername(username) {
 }
 
 export function getAllUsers() {
-  const rows = db.prepare('SELECT id, username, display_name, avatar, role, allowed_libraries, can_download, can_cast, show_on_login, is_active, created_at, last_login FROM users ORDER BY id ASC').all();
+  const rows = db.prepare('SELECT id, username, display_name, avatar, role, allowed_libraries, can_download, can_cast, show_on_login, is_active, token_version, created_at, last_login FROM users ORDER BY id ASC').all();
   return rows.map(u => ({
     ...u,
     allowed_libraries: u.allowed_libraries ? JSON.parse(u.allowed_libraries) : null,
@@ -948,13 +945,23 @@ export function updateUser(id, updates = {}) {
   const is_active = updates.is_active !== undefined ? (updates.is_active ? 1 : 0) : current.is_active;
   const last_login = updates.last_login !== undefined ? updates.last_login : current.last_login;
 
+  // Security-sensitive changes invalidate every previously issued token.
+  const securitySensitiveChange =
+    (updates.password_hash !== undefined && updates.password_hash !== current.password_hash) ||
+    (updates.role !== undefined && role !== current.role) ||
+    (updates.is_active !== undefined && is_active !== current.is_active) ||
+    updates.allowed_libraries !== undefined;
+  const token_version = securitySensitiveChange
+    ? (Number(current.token_version || 0) + 1)
+    : Number(current.token_version || 0);
+
   db.prepare(`
     UPDATE users SET 
       username = ?, password_hash = ?, display_name = ?, avatar = ?, 
       role = ?, allowed_libraries = ?, can_download = ?, can_cast = ?, 
-      show_on_login = ?, is_active = ?, last_login = ?
+      show_on_login = ?, is_active = ?, last_login = ?, token_version = ?
     WHERE id = ?
-  `).run(username, password_hash, display_name, avatar, role, allowed_libraries, can_download, can_cast, show_on_login, is_active, last_login, id);
+  `).run(username, password_hash, display_name, avatar, role, allowed_libraries, can_download, can_cast, show_on_login, is_active, last_login, token_version, id);
 
   return findUserById(id);
 }

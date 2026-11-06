@@ -5,7 +5,7 @@
 ; ==============================================================================
 
 #define MyAppName "ARN Stream"
-#define MyAppVersion "3.0.1"
+#define MyAppVersion "3.1.0"
 #define MyAppPublisher "ARN Technology"
 #define MyAppURL "https://facebook.com/abdouragab.nassar"
 #define MyAppExeName "ARN_Stream.exe"
@@ -49,15 +49,11 @@ ar.CompServerDesc=منصة البث وخادم الوسائط المنزلي ا�
 ar.TaskDesktopIcon=إنشاء اختصار لـ ARN Stream على سطح المكتب
 ar.TaskAutoStart=تشغيل خادم وسائط ARN Stream تلقائياً في الخلفية مع بدء تشغيل ويندوز
 ar.RunProgram=تشغيل ARN Stream الآن والدخول إلى الواجهة
-ar.CertRootStatus=جاري توثيق شهادة أمان ARN Technology Root...
-ar.CertPubStatus=جاري توثيق ناشر التطبيق في قائمة الناشرين الموثوقين...
 
 en.CompServerDesc=ARN Stream Media Server Platform
 en.TaskDesktopIcon=Create a desktop shortcut for ARN Stream
 en.TaskAutoStart=Start ARN Stream Media Server automatically in background with Windows
 en.RunProgram=Launch ARN Stream now
-en.CertRootStatus=Registering ARN Technology Root Certificate...
-en.CertPubStatus=Adding ARN Technology to Trusted Publishers...
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:TaskDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
@@ -79,8 +75,7 @@ Source: "server\*"; DestDir: "{app}\server"; Flags: ignoreversion recursesubdirs
 ; 5. Fresh Clean Database Template (Ensuring it does not overwrite existing user databases on update)
 Source: "backups\clean_media.db"; DestDir: "{userappdata}\ARN_Stream\data"; DestName: "media.db"; Flags: onlyifdoesntexist
 
-; 6. Security Certificate and Icons
-Source: "cert\ARN_Technology_Root.cer"; DestDir: "{app}\cert"; Flags: ignoreversion
+; 6. Icons (no root certificate is shipped or installed any more — see SECURITY.md)
 Source: "launcher\assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
@@ -93,14 +88,16 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDi
 Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "ARN Stream"; ValueData: """{app}\{#MyAppExeName}"" --autostart"; Flags: uninsdeletevalue; Tasks: autostart
 
 [Run]
-; Certificate registration in Windows Certificate Store (LocalMachine and CurrentUser)
-Filename: "certutil.exe"; Parameters: "-addstore -f ""Root"" ""{app}\cert\ARN_Technology_Root.cer"""; StatusMsg: "{cm:CertRootStatus}"; Flags: runhidden waituntilterminated
-Filename: "certutil.exe"; Parameters: "-addstore -f ""TrustedPublisher"" ""{app}\cert\ARN_Technology_Root.cer"""; StatusMsg: "{cm:CertPubStatus}"; Flags: runhidden waituntilterminated
-Filename: "certutil.exe"; Parameters: "-addstore -user -f ""Root"" ""{app}\cert\ARN_Technology_Root.cer"""; StatusMsg: "{cm:CertRootStatus}"; Flags: runhidden waituntilterminated
-Filename: "certutil.exe"; Parameters: "-addstore -user -f ""TrustedPublisher"" ""{app}\cert\ARN_Technology_Root.cer"""; StatusMsg: "{cm:CertPubStatus}"; Flags: runhidden waituntilterminated
-
 ; Remove any Mark-of-the-Web (Zone.Identifier) on installed executable
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Unblock-File -Path '{app}\{#MyAppExeName}'"""; Flags: runhidden waituntilterminated
 
 ; Post-install Launch
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:RunProgram}"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
+
+[UninstallRun]
+; Clean up the root certificate that older (<= 3.0.1) versions installed into the
+; Windows trust stores. This is a no-op on machines that never had it.
+Filename: "certutil.exe"; Parameters: "-delstore -f ""Root"" ""ARN Technology"""; Flags: runhidden waituntilterminated; RunOnceId: "RemoveArnRoot"
+Filename: "certutil.exe"; Parameters: "-delstore -user -f ""Root"" ""ARN Technology"""; Flags: runhidden waituntilterminated; RunOnceId: "RemoveArnRootUser"
+Filename: "certutil.exe"; Parameters: "-delstore -f ""TrustedPublisher"" ""ARN Technology"""; Flags: runhidden waituntilterminated; RunOnceId: "RemoveArnPublisher"
+Filename: "certutil.exe"; Parameters: "-delstore -user -f ""TrustedPublisher"" ""ARN Technology"""; Flags: runhidden waituntilterminated; RunOnceId: "RemoveArnPublisherUser"

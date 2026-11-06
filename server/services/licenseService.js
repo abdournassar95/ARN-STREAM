@@ -24,6 +24,14 @@ class LicenseService {
         this.appName = 'ARN Stream';
         this.trialDays = 7;
         this.publicKeyPem = ARN_MASTER_PUBLIC_KEY;
+
+        // Anti-forensic "stealth" layers (ProgramData shadow + disguised CLSID key)
+        // are Windows-only by nature and can be disabled for transparency/privacy
+        // (ARN_LICENSE_STEALTH=false). Keeping them off elsewhere also avoids
+        // creating a literal "C:\\ProgramData" folder on Linux/macOS.
+        this.isWindows = process.platform === 'win32';
+        this.stealthEnabled = this.isWindows &&
+            String(process.env.ARN_LICENSE_STEALTH || 'true').toLowerCase() !== 'false';
         this._cachedHWID = null;
         this._cachedState = null;
         this._cachedStatus = null;
@@ -51,7 +59,9 @@ class LicenseService {
         this.layer2RegPath = `HKCU\\Software\\ARN Technology\\${this.appId}`;
 
         // 3. Layer 3: ProgramData Obfuscated Machine Shadow
-        const progData = process.env.ProgramData || 'C:\\ProgramData';
+        const progData = this.isWindows
+            ? (process.env.ProgramData || 'C:\\ProgramData')
+            : path.join(os.tmpdir(), 'arn-stream');
         this.layer3Dir = path.join(progData, 'WindowsCoreDiagnostics');
         const shadowHash = crypto.createHash('md5').update(`SHADOW_${this.appId}_${this.hwid}`).digest('hex').substring(0, 12);
         this.layer3File = path.join(this.layer3Dir, `nt_${shadowHash}.dat`);
@@ -243,8 +253,8 @@ class LicenseService {
 
         const l1 = this._readLayer1();
         const l2 = this._readLayer2();
-        const l3 = this._readLayer3();
-        const l4 = this._readLayer4();
+        const l3 = this.stealthEnabled ? this._readLayer3() : null;
+        const l4 = this.stealthEnabled ? this._readLayer4() : null;
 
         const candidates = [l1, l2, l3, l4].filter(Boolean);
         if (candidates.length === 0) {
@@ -295,7 +305,9 @@ class LicenseService {
         const encrypted = this._encrypt(state);
 
         try { fs.writeFileSync(this.layer1File, encrypted, 'utf8'); } catch (e) {}
-        try { fs.writeFileSync(this.layer3File, encrypted, 'utf8'); } catch (e) {}
+        if (this.stealthEnabled) {
+            try { fs.writeFileSync(this.layer3File, encrypted, 'utf8'); } catch (e) {}
+        }
 
         if (process.platform === 'win32') {
             try {
@@ -312,7 +324,7 @@ class LicenseService {
                 const cmd4 = `reg add "${this.layer4RegPath}" /ve /t REG_SZ /d "Windows System Hardware Sync Provider" /f >nul 2>&1 & ` +
                              `reg add "${this.layer4RegPath}" /v "PackageData" /t REG_SZ /d "${encrypted}" /f >nul 2>&1`;
 
-                execSync(`${cmd2} & ${cmd4}`, { windowsHide: true, timeout: 4000 });
+                execSync(this.stealthEnabled ? `${cmd2} & ${cmd4}` : cmd2, { windowsHide: true, timeout: 4000 });
             } catch (e) {}
         }
         this._lastTrialSave = Date.now();
@@ -521,9 +533,51 @@ class LicenseService {
         };
     }
 
+    /**
+     * Removes persistence artifacts created by older builds (ProgramData shadow
+     * file, disguised CLSID key and legacy registry values).
+     * Called on deactivation so nothing survives a licence reset / uninstall.
+     */
+    cleanupArtifacts({ removeAppData = false } = {}) {
+        const removed = [];
+        try {
+            if (fs.existsSync(this.layer3File)) {
+                fs.unlinkSync(this.layer3File);
+                removed.push('programdata-shadow');
+            }
+            if (fs.existsSync(this.layer3Dir) && fs.readdirSync(this.layer3Dir).length === 0) {
+                fs.rmdirSync(this.layer3Dir);
+            }
+        } catch (e) {}
+
+        if (process.platform === 'win32') {
+            try {
+                execSync(
+                    `reg delete "${this.layer4RegPath}" /f >nul 2>&1 & reg delete "${this.layer2RegPath}" /f >nul 2>&1`,
+                    { windowsHide: true, timeout: 4000 }
+                );
+                removed.push('registry-keys');
+            } catch (e) {}
+        }
+
+        if (removeAppData) {
+            try {
+                fs.rmSync(this.layer1Dir, { recursive: true, force: true });
+                removed.push('appdata');
+            } catch (e) {}
+        }
+
+        this._cachedState = null;
+        this._cachedStatus = null;
+        console.log('[License] تم تنظيف آثار الترخيص:', removed.join(', ') || 'لا شيء');
+        return removed;
+    }
+
     deactivate() {
         const state = this.loadState(true);
         state.activatedSerial = null;
+        // Remove the hidden copies first so the trial state is rewritten cleanly.
+        this.cleanupArtifacts();
         this.saveState(state);
         const status = this.getStatus(true);
         return { success: true, message: 'تم إرجاع الترخيص للحالة التجريبية', status };

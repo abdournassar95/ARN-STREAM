@@ -5,10 +5,10 @@
 
 ![ARN Stream Logo](launcher/assets/icon.png)
 
-**الإصدار:** v3.0.1 • **المطور:** عبده رجب نصار • **الشركة:** ARN Technology  
+**الإصدار:** v3.1.0 • **المطور:** عبده رجب نصار • **الشركة:** ARN Technology  
 **الهوية:** تصميم عصري فاخر (Dark Glassmorphic UI) مع أداء عالي وسرعة استجابة فائقة.
 
-[![Node.js](https://img.shields.io/badge/Node.js-v18%2B-green.svg?logo=node.js)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-v22%2B-green.svg?logo=node.js)](https://nodejs.org/)
 [![React](https://img.shields.io/badge/React-18-blue.svg?logo=react)](https://react.dev/)
 [![Kotlin](https://img.shields.io/badge/Kotlin-Android_Compose-purple.svg?logo=kotlin)](https://developer.android.com/jetpack/compose)
 [![License](https://img.shields.io/badge/License-ARN_Technology-gold.svg)](LICENSE)
@@ -86,18 +86,33 @@ ARN-Stream/
 
 ## 📚 وثائق المشروع المتخصصة (Documentation)
 
-للاطلاع على الشروحات الفنية الدقيقة والمحدثة، يرجى مراجعة مجلد [docs/](file:///e:/مشاريعي/ARN-Stream/docs):
-- [المعمارية الهندسية للنظام ومخطط البيانات (ARCHITECTURE.md)](file:///e:/مشاريعي/ARN-Stream/docs/ARCHITECTURE.md)
-- [الدليل المرجعي للـ API و WebSockets و DLNA (API_REFERENCE.md)](file:///e:/مشاريعي/ARN-Stream/docs/API_REFERENCE.md)
-- [دليل تطبيق أندرويد الأصلي والهجين (ANDROID_CLIENT.md)](file:///e:/مشاريعي/ARN-Stream/docs/ANDROID_CLIENT.md)
+للاطلاع على الشروحات الفنية الدقيقة والمحدثة، يرجى مراجعة مجلد [docs/](./docs):
+- [المعمارية الهندسية للنظام ومخطط البيانات (ARCHITECTURE.md)](./docs/ARCHITECTURE.md)
+- [الدليل المرجعي للـ API و WebSockets و DLNA (API_REFERENCE.md)](./docs/API_REFERENCE.md)
+- [دليل تطبيق أندرويد الأصلي والهجين (ANDROID_CLIENT.md)](./docs/ANDROID_CLIENT.md)
 
 ---
 
 ## 🚀 التشغيل السريع لبيئة التطوير (Quick Start)
 
+### 0. المتطلبات
+* **Node.js 22 أو أحدث** (إلزامي: `better-sqlite3@13` و`music-metadata@12` يشترطان Node ≥ 22).
+* أدوات بناء أصلية عند أول تثبيت (لأن `better-sqlite3` يُترجم من المصدر):
+  * **Windows:** Visual Studio Build Tools + Python 3.
+  * **Linux:** `build-essential python3`.
+* نسخة التثبيت الجاهزة (`.exe`) تتضمن Node والاعتماديات مبنية مسبقاً، فلا تحتاج أي أدوات.
+
 ### 1. تثبيت الحزم (مرة واحدة):
 ```bash
 npm run install:all
+# أو بشكل حتمي (موصى به): npm ci --prefix server && npm ci --prefix client
+```
+
+### 1.1 الإعدادات (اختياري لكن موصى به):
+```bash
+copy server\.env.example server\.env    # Windows
+cp server/.env.example server/.env        # Linux/macOS
+# ثم عدّل JWT_SECRET وTMDB_API_KEY إن رغبت
 ```
 
 ### 2. تشغيل بيئة التطوير (Server + Frontend):
@@ -124,11 +139,19 @@ npm run install:all
 ```
 
 ينتج عن السكربت:
-1. توليد حزمة التثبيت الذاتية في `dist/setup/ARN_Stream_Setup_v2.0.3.exe`.
+1. توليد حزمة التثبيت الذاتية في `dist/setup/ARN_Stream_Setup_v3.1.0.exe`.
 2. حزمة ZIP مضغوطة قابلة للتوزيع المباشر.
 3. مزامنة تلقائية للإصدار في مسار الإصدارات: `E:\اصداراتي`.
 
 ---
+
+## 🔐 الأمان (Security)
+
+* **لا ترفع أبداً** `server/data/` أو `*.db` أو `*.jks` — المستودع يحتوي `.gitignore` صارماً لهذا الغرض.
+* الجلسات تُحمل في كوكي `httpOnly` (غير قابلة للقراءة من JavaScript) مع إمكانية إبطال فوري من الخادم.
+* راجع [SECURITY.md](./SECURITY.md) للتنبيه الخاص بالنسخ ≤ 3.0.1 وخطوات التدوير الإلزامية.
+* تفاصيل كل التقويات في الإصدار 3.1.0: [docs/SECURITY_HARDENING.md](./docs/SECURITY_HARDENING.md).
+* للإبلاغ عن ثغرة: لا تفتح Issue عاماً، تواصل مباشرة مع المطوّر.
 
 ## 👤 بيانات التواصل والدعم الفني (Developer & Support)
 

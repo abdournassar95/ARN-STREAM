@@ -1,6 +1,6 @@
 {
   "name": "arn-stream",
-  "version": "3.0.1",
+  "version": "3.1.0",
   "private": true,
   "description": "ARN Stream - منصة بث وإدارة الوسائط المتكاملة لشركة ARN Technology (تطوير وبرمجة عبده رجب نصار)",
   "author": "Abdou Ragab Nassar (ARN Technology)",
@@ -9,10 +9,16 @@
     "dev": "concurrently \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
     "dev:server": "npm run dev --prefix server",
     "dev:client": "npm run dev --prefix client",
-    "install:all": "npm install --prefix server && npm install --prefix client",
-    "build": "npm run build --prefix client"
+    "install:all": "npm ci --prefix server && npm ci --prefix client",
+    "build": "npm run build --prefix client",
+    "test": "npm test --prefix server",
+    "verify": "npm run build && npm test && npm run audit",
+    "audit": "npm audit --prefix server --audit-level=high && npm audit --prefix client --audit-level=high"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

@@ -63,18 +63,12 @@ import PlayerWatermark from '../../components/player/PlayerWatermark';
 import PlayerNowPlayingBanner from '../../components/player/PlayerNowPlayingBanner';
 import PlayerQueueDrawer from '../../components/player/PlayerQueueDrawer';
 
-const getAuthToken = () => {
-  return localStorage.getItem('arn_auth_token') || '';
-};
-
-const authFetch = (url, options = {}) => {
-  const token = getAuthToken();
-  const headers = { ...(options.headers || {}) };
-  if (token && !headers['Authorization']) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  return fetch(url, { ...options, headers });
-};
+// Session is carried by an httpOnly cookie — same-origin fetch/video/element
+// requests include it automatically, so no token is ever exposed to JS.
+const authFetch = (url, options = {}) => fetch(url, {
+  credentials: 'same-origin',
+  ...options
+});
 
 function formatTime(seconds) {
   if (!seconds || isNaN(seconds) || seconds < 0) return '00:00';
@@ -682,17 +676,15 @@ export default function Player() {
   // Derive the active subtitle WebVTT URL cleanly (handling embedded, local files, and downloaded tracks)
   const getSubtitleUrl = useCallback((sub, offset = subtitleOffset) => {
     if (!sub) return null;
-    const token = getAuthToken();
-    const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
     const offsetParam = offset ? `&offset=${offset}` : '';
 
     if (sub.isEmbedded || sub.streamIndex !== undefined || (sub.index !== undefined && !sub.path)) {
       const sIndex = sub.streamIndex ?? sub.index ?? 0;
-      return `/api/subtitles/serve?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}&streamIndex=${sIndex}${offsetParam}${tokenParam}`;
+      return `/api/subtitles/serve?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}&streamIndex=${sIndex}${offsetParam}`;
     }
 
     if (sub.path) {
-      return `/api/subtitles/serve?path=${encodeURIComponent(sub.path)}${offsetParam}${tokenParam}`;
+      return `/api/subtitles/serve?path=${encodeURIComponent(sub.path)}${offsetParam}`;
     }
 
     if (sub.url) {
@@ -961,9 +953,7 @@ export default function Player() {
   }, [getPrevVideo, navigate, type, isCurrentInQueue, isFullscreen]);
 
   const buildStreamUrl = useCallback((params = {}) => {
-    const token = getAuthToken();
     const q = new URLSearchParams();
-    if (token) q.set('token', token);
     if (forcedMode) q.set('mode', forcedMode);
     for (const [k, v] of Object.entries(params)) {
       if (v !== undefined && v !== null) q.set(k, String(v));
@@ -2311,7 +2301,6 @@ export default function Player() {
           ? Math.round(seekOffsetRef.current + v.currentTime)
           : Math.round(v.currentTime);
         if (effectivePos < 5) return;
-        const token = getAuthToken();
         const payload = JSON.stringify({
           media_type: type,
           media_id: Number(id),
@@ -2320,7 +2309,7 @@ export default function Player() {
         });
         if (navigator.sendBeacon) {
           const blob = new Blob([payload], { type: 'application/json' });
-          navigator.sendBeacon(`/api/playback?token=${encodeURIComponent(token)}`, blob);
+          navigator.sendBeacon('/api/playback', blob);
         }
       }
     };

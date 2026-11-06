@@ -3,21 +3,21 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
-  esbuild: {
-    drop: process.env.NODE_ENV === 'production' ? ['debugger'] : []
-  },
   build: {
     target: 'es2020',
     cssCodeSplit: true,
     chunkSizeWarningLimit: 900,
     rollupOptions: {
       output: {
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-          'vendor-query': ['@tanstack/react-query', 'axios', 'zustand'],
-          'vendor-motion': ['framer-motion'],
-          'vendor-icons': ['lucide-react'],
-          'vendor-i18n': ['i18next', 'react-i18next']
+        // Vite 8 (Rolldown) requires manualChunks to be a function.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('framer-motion')) return 'vendor-motion';
+          if (id.includes('lucide-react')) return 'vendor-icons';
+          if (id.includes('i18next')) return 'vendor-i18n';
+          if (id.includes('@tanstack') || id.includes('axios') || id.includes('zustand')) return 'vendor-query';
+          if (id.includes('react-router') || id.includes('react-dom') || /node_modules[\\/](react|scheduler)[\\/]/.test(id)) return 'vendor-react';
+          return undefined;
         }
       }
     }

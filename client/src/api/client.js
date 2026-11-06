@@ -1,36 +1,24 @@
 import axios from 'axios';
 
+/**
+ * ARN Stream API client.
+ * Authentication is carried by an httpOnly session cookie (same-origin), so no
+ * token is ever stored in localStorage where an XSS could steal it.
+ * Native clients (Android) still authenticate with a Bearer token.
+ */
 const client = axios.create({
   baseURL: '/api',
-  timeout: 15000
-});
-
-export function syncAuthCookie() {
-  try {
-    const token = localStorage.getItem('arn_auth_token');
-    if (token) {
-      document.cookie = `arn_auth_token=${encodeURIComponent(token)}; path=/; max-age=2592000; SameSite=Lax`;
-    }
-  } catch (e) {}
-}
-syncAuthCookie();
-
-client.interceptors.request.use((config) => {
-  const token = localStorage.getItem('arn_auth_token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-    syncAuthCookie();
-  }
-  return config;
+  timeout: 20000,
+  withCredentials: true
 });
 
 client.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401 && !window.location.pathname.startsWith('/login')) {
-      // Don't auto-redirect if checking status
-      if (!err.config?.url?.includes('/auth/status')) {
-        localStorage.removeItem('arn_auth_token');
+      // Don't auto-redirect while probing auth status / setup screens.
+      const url = err.config?.url || '';
+      if (!url.includes('/auth/status') && !url.includes('/auth/setup') && !url.includes('/license/')) {
         try {
           document.cookie = 'arn_auth_token=; path=/; max-age=0; SameSite=Lax';
         } catch (e) {}
@@ -153,6 +141,7 @@ export const fetchTracksByGenre = (genre, params) => client.get(`/tracks/genre/$
 // Authentication & Users (RBAC)
 export const fetchAuthStatus = () => client.get('/auth/status').then(r => r.data.data);
 export const loginApi = (credentials) => client.post('/auth/login', credentials).then(r => r.data.data);
+export const logoutApi = () => client.post('/auth/logout').then(r => r.data.data);
 export const setupAdminApi = (payload) => client.post('/auth/setup', payload).then(r => r.data.data);
 export const fetchCurrentUser = () => client.get('/auth/me').then(r => r.data.data);
 export const changePasswordApi = (payload) => client.put('/auth/password', payload).then(r => r.data.data);
@@ -168,9 +157,8 @@ export const deleteUserApi = (id) => client.delete(`/auth/users/${id}`).then(r =
 
 // Media Downloads
 export function getDownloadUrl(path, params = {}) {
-  const token = localStorage.getItem('arn_auth_token');
+  // Same-origin downloads automatically include the httpOnly session cookie.
   const url = new URL(path.startsWith('/') ? path : `/${path}`, window.location.origin);
-  if (token) url.searchParams.set('token', token);
   Object.entries(params).forEach(([k, v]) => {
     if (v !== undefined && v !== null && v !== '') {
       url.searchParams.set(k, String(v));
