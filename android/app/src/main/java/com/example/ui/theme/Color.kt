@@ -27,3 +27,9 @@ val ArnColorQuran = Color(0xFF10B981)         // قرآن — زمردي
 val ArnColorPlays = Color(0xFFF59E0B)         // مسرحيات — ذهبي
 val ArnColorMusic = Color(0xFFEC4899)         // موسيقى — وردي
 val ArnColorDocumentaries = Color(0xFF14B8A6) // وثائقيات — فيروزي
+
+// ── أسطح زجاجية (Glassmorphism) ────────────────────────────────────────────
+// كانت مستخدمة في GlassCard/ProfileLoginScreen دون تعريف.
+val ArnGlassBg = Color(0x1AFFFFFF)       // تعبئة زجاجية شفافة
+val ArnGlassBorder = Color(0x33FFFFFF)   // حد زجاجي
+val ArnDeepVoid = Color(0xFF05070E)      // خلفية أعمق من Obsidian
