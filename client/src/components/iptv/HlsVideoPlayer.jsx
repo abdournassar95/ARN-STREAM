@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import Hls from 'hls.js';
 import {
   Play,
   Pause,
@@ -338,6 +337,7 @@ export const HlsVideoPlayer = ({
     if (!videoEl || !channel) return;
 
     if (!activeSource) return;
+    let cancelled = false;
 
     setIsLoading(true);
     setErrorMsg(null);
@@ -406,107 +406,122 @@ export const HlsVideoPlayer = ({
       };
     }
 
-    if (Hls.isSupported()) {
-      const hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: true,
-        backBufferLength: 60,
-        manifestLoadingTimeOut: 12000,
-        manifestLoadingMaxRetry: 1,
-        levelLoadingTimeOut: 12000,
-      });
-      hlsRef.current = hls;
+    const loadStream = async () => {
+      try {
+        const { default: Hls } = await import('hls.js');
+        if (cancelled) return;
 
-      hls.loadSource(sourceUrl);
-      hls.attachMedia(videoEl);
-
-      hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
-        setIsLoading(false);
-        const extractedLevels = data.levels.map((lvl, index) => {
-          const height = lvl.height || 0;
-          const bitrateKbps = Math.round((lvl.bitrate || 0) / 1000);
-          let label = height ? `${height}p (${bitrateKbps} kbps)` : `مستوى ${index + 1} (${bitrateKbps} kbps)`;
-          if (height >= 2160) label = `4K UHD (${height}p · ${bitrateKbps} kbps)`;
-          else if (height >= 1080) label = `FHD 1080p (${bitrateKbps} kbps)`;
-          else if (height >= 720) label = `HD 720p (${bitrateKbps} kbps)`;
-          else if (height >= 480) label = `SD 480p (${bitrateKbps} kbps)`;
-          else if (height > 0) label = `LD ${height}p (${bitrateKbps} kbps)`;
-
-          return {
-            index,
-            height,
-            width: lvl.width || 0,
-            bitrate: bitrateKbps,
-            label,
-          };
-        });
-
-        setQualities(extractedLevels);
-        if (Array.isArray(data.audioTracks) && data.audioTracks.length > 1) {
-          setAudioTracks(
-            data.audioTracks.map((t, idx) => ({
-              id: idx,
-              name: t.name || t.lang || `مسار صوتي ${idx + 1}`,
-              lang: t.lang,
-            }))
-          );
-        }
-        videoEl
-          .play()
-          .then(() => {
-            setIsPlaying(true);
-            applyVolume(volume, false);
-          })
-          .catch(() => {
-            setIsPlaying(false);
+        if (Hls.isSupported()) {
+          const hls = new Hls({
+            enableWorker: true,
+            lowLatencyMode: true,
+            backBufferLength: 60,
+            manifestLoadingTimeOut: 12000,
+            manifestLoadingMaxRetry: 1,
+            levelLoadingTimeOut: 12000,
           });
-      });
+          hlsRef.current = hls;
 
-      hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, (_event, data) => {
-        if (Array.isArray(data.audioTracks) && data.audioTracks.length > 1) {
-          setAudioTracks(
-            data.audioTracks.map((t, idx) => ({
-              id: idx,
-              name: t.name || t.lang || `مسار صوتي ${idx + 1}`,
-              lang: t.lang,
-            }))
-          );
-        }
-      });
+          hls.loadSource(sourceUrl);
+          hls.attachMedia(videoEl);
 
-      hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal) {
-          switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
-              hls.destroy();
-              handleAutoFailover('خطأ في شبكة البث');
-              break;
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              hls.recoverMediaError();
-              break;
-            default:
-              hls.destroy();
-              handleAutoFailover('خطأ غير متوقع في محرك HLS');
-              break;
-          }
+          hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
+            setIsLoading(false);
+            const extractedLevels = data.levels.map((lvl, index) => {
+              const height = lvl.height || 0;
+              const bitrateKbps = Math.round((lvl.bitrate || 0) / 1000);
+              let label = height ? `${height}p (${bitrateKbps} kbps)` : `مستوى ${index + 1} (${bitrateKbps} kbps)`;
+              if (height >= 2160) label = `4K UHD (${height}p · ${bitrateKbps} kbps)`;
+              else if (height >= 1080) label = `FHD 1080p (${bitrateKbps} kbps)`;
+              else if (height >= 720) label = `HD 720p (${bitrateKbps} kbps)`;
+              else if (height >= 480) label = `SD 480p (${bitrateKbps} kbps)`;
+              else if (height > 0) label = `LD ${height}p (${bitrateKbps} kbps)`;
+
+              return {
+                index,
+                height,
+                width: lvl.width || 0,
+                bitrate: bitrateKbps,
+                label,
+              };
+            });
+
+            setQualities(extractedLevels);
+            if (Array.isArray(data.audioTracks) && data.audioTracks.length > 1) {
+              setAudioTracks(
+                data.audioTracks.map((t, idx) => ({
+                  id: idx,
+                  name: t.name || t.lang || `مسار صوتي ${idx + 1}`,
+                  lang: t.lang,
+                }))
+              );
+            }
+            videoEl
+              .play()
+              .then(() => {
+                setIsPlaying(true);
+                applyVolume(volume, false);
+              })
+              .catch(() => {
+                setIsPlaying(false);
+              });
+          });
+
+          hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, (_event, data) => {
+            if (Array.isArray(data.audioTracks) && data.audioTracks.length > 1) {
+              setAudioTracks(
+                data.audioTracks.map((t, idx) => ({
+                  id: idx,
+                  name: t.name || t.lang || `مسار صوتي ${idx + 1}`,
+                  lang: t.lang,
+                }))
+              );
+            }
+          });
+
+          hls.on(Hls.Events.ERROR, (_event, data) => {
+            if (data.fatal) {
+              switch (data.type) {
+                case Hls.ErrorTypes.NETWORK_ERROR:
+                  hls.destroy();
+                  handleAutoFailover('خطأ في شبكة البث');
+                  break;
+                case Hls.ErrorTypes.MEDIA_ERROR:
+                  hls.recoverMediaError();
+                  break;
+                default:
+                  hls.destroy();
+                  handleAutoFailover('خطأ غير متوقع في محرك HLS');
+                  break;
+              }
+            }
+          });
+        } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+          videoEl.src = sourceUrl;
+          videoEl
+            .play()
+            .then(() => {
+              setIsLoading(false);
+              setIsPlaying(true);
+            })
+            .catch(() => {
+              setIsLoading(false);
+              setIsPlaying(false);
+            });
+        } else {
+          setIsLoading(false);
+          setErrorMsg('متصفحك الحالي لا يدعم تقنية تشغيل دفق HLS.');
         }
-      });
-    } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-      videoEl.src = sourceUrl;
-      videoEl
-        .play()
-        .then(() => {
+      } catch (error) {
+        if (!cancelled) {
+          console.error('[HlsVideoPlayer] Failed to load HLS engine:', error);
           setIsLoading(false);
-          setIsPlaying(true);
-        })
-        .catch(() => {
-          setIsLoading(false);
-          setIsPlaying(false);
-        });
-    } else {
-      setIsLoading(false);
-      setErrorMsg('متصفحك الحالي لا يدعم تقنية تشغيل دفق HLS.');
-    }
+          setErrorMsg('تعذر تحميل محرك تشغيل البث. يرجى المحاولة مرة أخرى.');
+        }
+      }
+    };
+
+    loadStream();
 
     // Audio-only watchdog: If a TV channel plays audio but has 0 video dimensions, failover to next video server
     let audioOnlyCheckTimer = null;
@@ -550,6 +565,7 @@ export const HlsVideoPlayer = ({
     }
 
     return () => {
+      cancelled = true;
       videoEl.removeEventListener('timeupdate', onTimeUpdateAudioOnlyCheck);
       if (audioOnlyCheckTimer) {
         window.clearTimeout(audioOnlyCheckTimer);

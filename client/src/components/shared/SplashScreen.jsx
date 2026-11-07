@@ -210,11 +210,11 @@ export default function SplashScreen() {
         setTaglineIndex(prev => (prev + 1) % taglines.length);
         setTaglineFade(false);
       }, 350);
-    }, 550);
+    }, 1800);
     return () => clearInterval(interval);
   }, [visible, taglines.length]);
 
-  // Progress syncing loop (~10.5 seconds to reach 100% + 1.5s victory reveal = ~12s total)
+  // Keep the splash close to 15 seconds while limiting progress-driven React renders to 10/sec.
   useEffect(() => {
     if (!visible) return;
     setProgress(0);
@@ -222,7 +222,7 @@ export default function SplashScreen() {
 
     progressTimerRef.current = setInterval(() => {
       setProgress(prev => {
-        const next = prev + Math.random() * 2.4 + 1.4;
+        const next = prev + (Math.random() * 0.19 + 0.11) * (100 / 28);
         if (next >= 100) {
           clearInterval(progressTimerRef.current);
           setIsDone(true);
@@ -233,7 +233,7 @@ export default function SplashScreen() {
         }
         return next;
       });
-    }, 28);
+    }, 100);
 
     return () => {
       if (progressTimerRef.current) clearInterval(progressTimerRef.current);
@@ -430,6 +430,7 @@ export default function SplashScreen() {
 
     // Ultra-Fast Render loop (Runs at full 60fps+ on any device)
     const animate = () => {
+      if (document.hidden) return;
       ctx.clearRect(0, 0, W, H);
 
       // Lightweight proximity connection lines (Squared distance check avoids Math.sqrt)
@@ -473,12 +474,24 @@ export default function SplashScreen() {
       animFrameRef.current = requestAnimationFrame(animate);
     };
 
-    animate();
+    const handleVisibilityChange = () => {
+      containerRef.current?.classList.toggle('splash-paused', document.hidden);
+      if (document.hidden) {
+        cancelAnimationFrame(animFrameRef.current);
+        return;
+      }
+      animFrameRef.current = requestAnimationFrame(animate);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    containerRef.current?.classList.toggle('splash-paused', document.hidden);
+    if (!document.hidden) animate();
 
     return () => {
       cancelAnimationFrame(animFrameRef.current);
       if (mouseRafId) cancelAnimationFrame(mouseRafId);
       clearInterval(starSpawnInterval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('resize', resize);
       window.removeEventListener('mousemove', handleMouseMove);
     };
@@ -498,6 +511,10 @@ export default function SplashScreen() {
           overflow: hidden; z-index: 99999; isolation: isolate;
           user-select: none;
           font-family: 'Tajawal', sans-serif !important;
+        }
+        #arn-splash-container.splash-paused,
+        #arn-splash-container.splash-paused * {
+          animation-play-state: paused !important;
         }
 
         #starfield { position: absolute; inset: 0; z-index: 1; pointer-events: none; }

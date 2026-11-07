@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { lazy, Suspense, useEffect, useMemo, useState, useCallback } from 'react';
 import {
   Tv,
   Film,
@@ -23,13 +23,14 @@ import TopBar from '../components/shared/TopBar';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { usePlayerStore } from '../store/usePlayerStore';
 import { HlsVideoPlayer } from '../components/iptv/HlsVideoPlayer';
-import { PlaylistModal } from '../components/iptv/PlaylistModal';
 import { getCategoryVisual, getChannelFallbackLogo } from '../utils/iptvIcons';
 import {
   loadCatalogFromIdb,
   saveCatalogToIdb,
   normalizeChannelItem,
 } from '../utils/catalogStorage';
+
+const PlaylistModal = lazy(() => import('../components/iptv/PlaylistModal'));
 
 const STORAGE_KEYS = {
   FAVORITES: 'arn_iptv_clean_v5_favorites',
@@ -1339,20 +1340,24 @@ export default function LiveTv() {
       </div>
 
       {/* Playlist & Activation Modal */}
-      <PlaylistModal
-        isOpen={isPlaylistModalOpen}
-        onClose={() => setIsPlaylistModalOpen(false)}
-        playlists={playlists}
-        activePlaylistId={activePlaylistId}
-        onSelectPlaylist={(id) => {
-          setActivePlaylistId(id);
-          const firstCh = channels.find((c) => c.playlistId === id);
-          if (firstCh) setActiveChannel(firstCh);
-        }}
-        onDeletePlaylist={handleDeletePlaylist}
-        onImportSuccess={handleImportSuccess}
-        onLoadBuiltinCatalog={loadBuiltinCatalog}
-      />
+      {isPlaylistModalOpen && (
+        <Suspense fallback={null}>
+          <PlaylistModal
+            isOpen={isPlaylistModalOpen}
+            onClose={() => setIsPlaylistModalOpen(false)}
+            playlists={playlists}
+            activePlaylistId={activePlaylistId}
+            onSelectPlaylist={(id) => {
+              setActivePlaylistId(id);
+              const firstCh = channels.find((c) => c.playlistId === id);
+              if (firstCh) setActiveChannel(firstCh);
+            }}
+            onDeletePlaylist={handleDeletePlaylist}
+            onImportSuccess={handleImportSuccess}
+            onLoadBuiltinCatalog={loadBuiltinCatalog}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

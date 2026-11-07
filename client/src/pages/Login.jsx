@@ -143,6 +143,7 @@ export default function Login() {
         navigate(target, { replace: true });
       }, 500);
     } catch (err) {
+      setShowPassword(false);
       setErrorMsg(err.response?.data?.error?.message || (isRtl ? 'اسم المستخدم أو كلمة المرور غير صحيحة' : 'Invalid username or password'));
     } finally { setSubmitting(false); }
   };
